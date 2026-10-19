@@ -30,7 +30,6 @@
 本项目基于 [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager)（MIT）定制，保留原作者版权和第三方许可。
 
 - 使用 Workbuddy Pro 名称与自定义 Logo、favicon。
-- 登录表单默认隐藏，**点击 Logo 10 次**弹出；关闭后重新计数，刷新后恢复隐藏。
 - 中英文说明已移除赞助横幅、推广链接与优惠码。
 - 本分支源码、问题反馈与发布包均在 [kerntau/workbuddy-pro](https://github.com/kerntau/workbuddy-pro) 维护。
 

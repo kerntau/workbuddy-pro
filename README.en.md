@@ -30,7 +30,6 @@ A web console for [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api)
 Workbuddy Pro is a custom edition of [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager), distributed under the original MIT license with its copyright and third-party notices retained.
 
 - Custom product name, login logo and favicon.
-- The login form is hidden initially. **Click the logo 10 times** to open it; closing the dialog resets the count, and reloading hides it again.
 - Sponsor banners, promotional links and discount codes have been removed from both READMEs.
 - Source code, issue reports and [releases](https://github.com/kerntau/workbuddy-pro/releases) are maintained in this repository.
 
@@ -136,7 +135,7 @@ More screenshots: [full gallery](docs/screenshots.md).
 
 ## Quick start
 
-On Windows, download `WorkbuddyProSetup.exe` from [Releases](https://github.com/kerntau/workbuddy-pro/releases), run the installer and start the project. Click the login logo 10 times to open the administrator login.
+On Windows, download `WorkbuddyProSetup.exe` from [Releases](https://github.com/kerntau/workbuddy-pro/releases), run the installer and start the project.
 
 For a server, Docker with 1 vCPU / 1 GB is enough. Pick one:
 
