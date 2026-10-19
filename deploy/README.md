@@ -21,12 +21,12 @@
 
 ### 包内自带，开箱即用
 
-最新版本的 Release 包内含 `upstream/`（上游源码），装的时候直接用，
-**不需要联网取任何外部源码**：
+最新版本的 Release 包内含 `upstream/`（上游源码），装的时候直接用。
+推荐运行下一节的一键命令；手动下载时，从 [最新 Release](https://github.com/kerntau/workbuddy-pro/releases/latest) 选择 `workbuddy-pro-vX.Y.Z.tar.gz` 和同名 `.sha256`，在文件所在目录运行：
 
 ```bash
-wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-pro-<版本>.tar.gz
-tar xzf workbuddy-pro-*.tar.gz && cd workbuddy-pro-*
+sha256sum -c workbuddy-pro-vX.Y.Z.tar.gz.sha256
+tar xzf workbuddy-pro-vX.Y.Z.tar.gz && cd workbuddy-pro-vX.Y.Z
 sudo bash deploy/install.sh          # 自动使用包内的 upstream/
 ```
 
@@ -67,27 +67,40 @@ cd /opt/workbuddy2api && docker compose up -d --build
 
 ---
 
-## 一、最简单的方式：Release 包 + 一键脚本
+## 一、Ubuntu / Debian 一键部署（自动安装全部依赖）
+
+支持使用 systemd 的 Ubuntu / Debian 云服务器，架构为 x86_64 / ARM64。无需预装 Python、Docker、Compose 或 Node.js。首次构建上游建议至少 2 GB 内存，并确保服务器能访问 GitHub、Docker Hub 和软件源。
 
 ```bash
-# 1) 下载 Release 包（内含已构建的前端，无需 Node.js）
-wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-pro-<版本>.tar.gz
-tar xzf workbuddy-pro-*.tar.gz
-cd workbuddy-pro-*
-
-# 2) 一键部署（自动检测上游；上游源码用 UPSTREAM_SRC 指定，见上一节）
-sudo bash deploy/install.sh
+sudo bash -c 'set -e; apt-get update; apt-get install -y curl ca-certificates; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL --retry 3 https://raw.githubusercontent.com/kerntau/workbuddy-pro/main/deploy/bootstrap.sh -o "$f"; bash "$f"'
 ```
 
 脚本会自动完成：
 
-1. 环境预检（Python ≥3.9、Docker、端口占用检查）
-2. **安装上游 workbuddy2api** —— 取源码（本地目录或 git 地址）、生成随机 `api_key`、
-   设置目录属主、构建并启动容器、等待就绪
-3. 安装管理端 —— 部署代码、装依赖、注册 systemd 服务
-4. 验证两条链路并打印访问地址与初始密码
+1. 安装 curl、证书、Git、Python 和 venv 等系统包。Python 低于 3.11 时，使用官方 uv 为项目安装独立 Python 3.12，保留系统 Python。
+2. 安装 Docker 官方 APT 软件包和 Compose 插件；已有 Docker 时复用，只在缺少 Compose 时补装插件。
+3. 下载最新 Release 部署包及 `.sha256`，校验通过后解压；不使用 GitHub 自动生成的 `Source code` 源码包。
+4. 使用包内上游源码构建网关，生成随机密钥，上游端口仅绑定 `127.0.0.1:7863`。
+5. 安装管理端到 `/opt/workbuddy-pro`，创建项目虚拟环境，启动并设置 systemd 开机自启。已有 `/opt/workbuddy-manager` 部署时沿用原目录。
+6. 检查服务与 HTTP 接口，成功后打印访问地址和密码位置；启动失败时停止并报错。
 
-**全程无需手工编辑任何配置文件。**
+装完后，在云平台安全组允许 TCP `7864`，访问 `http://服务器公网IP:7864`。若主机防火墙已启用，也需要允许该端口；脚本不会修改现有防火墙规则。用户名 `admin`，默认密码位置：
+
+```bash
+sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt
+```
+
+重跑脚本会同步程序并重启服务，保留 `.env`、账号、密码与数据库。上游已有配置时沿用，不覆盖网关密钥。公网长期使用的 HTTPS 配置见下文。
+
+也可先下载脚本，再设置安装目录、端口或固定版本：
+
+```bash
+curl -fsSL --retry 3 https://raw.githubusercontent.com/kerntau/workbuddy-pro/main/deploy/bootstrap.sh -o bootstrap.sh
+sudo APP_DIR=/opt/workbuddy-pro MANAGER_PORT=7864 WB_VERSION=v2.6.6 bash bootstrap.sh
+# 只安装依赖：sudo bash bootstrap.sh --deps-only
+```
+
+手动解压 Release 后的 `sudo bash deploy/install.sh` 同样自动安装依赖。不要在 Docker 容器里运行此宿主机脚本。
 
 ---
 
@@ -308,8 +321,8 @@ location /workbuddy-manager/ {
 ### 方式二：命令行
 
 ```bash
-cd /opt/workbuddy-manager
-sudo /opt/workbuddy-manager/venv/bin/python deploy/update.py --target both
+cd /opt/workbuddy-pro
+sudo /opt/workbuddy-pro/venv/bin/python deploy/update.py --target both
 ```
 
 `--target` 取值为 `manager` / `upstream` / `both`。
@@ -398,7 +411,7 @@ docker compose up -d workbuddy-manager
 ## 五、目录与端口
 
 ```
-管理端   /opt/workbuddy-manager         :7864   监听 0.0.0.0（经反代对外；建议防火墙收紧）
+管理端   /opt/workbuddy-pro             :7864   监听 0.0.0.0（经反代对外；建议防火墙收紧）
   ├─ server/        后端代码
   ├─ web/out/       前端静态产物
   ├─ data/          SQLite、users.json（含会话密钥）
@@ -428,8 +441,8 @@ systemctl status workbuddy-web
 curl -s http://127.0.0.1:7864/healthz             # 含上游连通性
 
 # 升级
-cd /opt/workbuddy-manager && git pull              # 管理端代码
-cd /opt/workbuddy2api && git pull && docker compose up -d --build  # 上游
+cd /opt/workbuddy-pro
+sudo venv/bin/python deploy/update.py --target both
 ```
 
 ---
@@ -439,7 +452,7 @@ cd /opt/workbuddy2api && git pull && docker compose up -d --build  # 上游
 ```bash
 systemctl disable --now workbuddy-web
 rm -f /etc/systemd/system/workbuddy-web.service && systemctl daemon-reload
-rm -rf /opt/workbuddy-manager
+rm -rf /opt/workbuddy-pro
 
 cd /opt/workbuddy2api && docker compose down
 rm -rf /opt/workbuddy2api        # 注意：会删除账号授权文件
@@ -449,9 +462,8 @@ rm -rf /opt/workbuddy2api        # 注意：会删除账号授权文件
 
 ## 八、常见问题
 
-**Q：脚本提示「未检测到 Docker」**
-上游只提供 Docker 部署方式。请先安装 Docker 与 compose 插件，或用
-`--skip-upstream` 跳过并自行部署上游。
+**Q：需要先手动安装 Python、Docker 或 Compose 吗？**
+Ubuntu / Debian 的一键脚本会自动安装。已有 Docker 会被复用；仅缺少 Compose 时只安装插件。系统 Python 太旧时为项目安装独立 Python 3.12。下载或安装失败时，脚本会报出具体错误，修复网络或软件源后重跑即可。
 
 **Q：管理端显示「反代上游不可用」**
 上游容器未运行或端口不通。检查：
@@ -553,9 +565,8 @@ grep api_key /opt/workbuddy2api/config.json
 > 「设置 → 上游配置 → 服务信息」显示上游地址与接入密钥（已隐藏）。
 > 这正是本管理端存在的意义：把上游的命令行能力变成看得见的界面。
 
-> **顺带一提（安全）**：管理端默认只绑 `127.0.0.1:7864`，而上游默认监听
-> `0.0.0.0:7863`——也就是**公网可直接访问上游端口**（仍需 api_key，但少一层
-> 暴露少一类风险）。
+> 本指南的一键脚本让管理端监听 `0.0.0.0:7864`，上游只发布到
+> `127.0.0.1:7863`。使用其他 compose 配置时，请检查实际的端口映射。
 >
 > 想收紧的话，**别直接照抄「改成 127.0.0.1」**：上游能不能只绑回环，取决于
 > 管理端怎么连它。

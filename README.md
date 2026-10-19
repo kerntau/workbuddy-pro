@@ -127,7 +127,7 @@
 
 ## 快速开始
 
-服务器部署需要 Docker（1 核 1G 起）；Windows 桌面用户可直接用图形安装器。三种方式任选：
+Ubuntu / Debian 云服务器可运行下面的一键命令，自动安装所需环境；Windows 桌面用户可直接用图形安装器。三种方式任选：
 
 **① Windows 安装器（桌面图形化，无需 Docker / 命令行）**
 
@@ -135,7 +135,7 @@
    `WorkbuddyProSetup.exe`（发版时由 CI 在 Windows runner 上自动构建并附带，同目录还有
    一个 `.sha256` 可核对）。v1.0.88 的安装器曾因卸载会误删文件被下线（见该版本 Release
    说明），**v1.0.89 起已修复**：卸载只删程序自己的文件，安装目录也改成「选中目录 +
-   `WorkBuddyManager` 子目录」。
+   `WorkbuddyPro` 子目录」。
 2. 按向导选择安装目录 → 安装 → 完成时可勾选「立即启动」。
 3. 之后用桌面快捷方式打开控制台：点 **启动项目**，状态变「运行中」并自动打开管理面板；
    随时可 **重启 / 关闭项目**、修改监听 IP 与端口（保存后重启生效）、点 **打开面板** 回到页面。
@@ -156,15 +156,19 @@ cd workbuddy-pro
 docker compose up -d --build
 ```
 
-**③ 服务器部署包（装依赖、配 systemd）**
+**③ Ubuntu / Debian 一键部署（推荐）**
 
-从 [Releases](https://github.com/kerntau/workbuddy-pro/releases) 下载 `.tar.gz`，核对发布页 SHA-256 后解压，在解压目录运行：
+在使用 systemd 的云服务器上执行（支持 x86_64 / ARM64）：
 
 ```bash
-sudo bash deploy/install.sh
+sudo bash -c 'set -e; apt-get update; apt-get install -y curl ca-certificates; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL --retry 3 https://raw.githubusercontent.com/kerntau/workbuddy-pro/main/deploy/bootstrap.sh -o "$f"; bash "$f"'
 ```
 
-装完浏览器打开 `http://<服务器>:7864`，首次启动的日志里会打印初始管理员密码。
+脚本自动安装 Python 3.11+、Docker、Compose 和系统依赖，下载最新 Release 并校验 SHA-256，部署上游与管理端、设置开机启动。服务器无需预装 Python、Docker 或 Node.js。
+
+在云平台安全组放行 TCP `7864`，然后打开 `http://<服务器公网IP>:7864`。用户名 `admin`，初始密码可执行 `sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt` 查看；已有旧目录 `/opt/workbuddy-manager` 时会自动沿用并打印实际路径。重复运行保留配置与账号。
+
+也可下载 [Release](https://github.com/kerntau/workbuddy-pro/releases/latest) 的 `.tar.gz`，核对摘要后解压，执行 `sudo bash deploy/install.sh`，同样自动安装依赖。首次构建上游需要联网并等待数分钟。
 
 > 上游源码随发布包一起分发，装完即可用。反向代理与 HTTPS、端口收敛、Windows 原生
 > 部署（无需 Docker）、本地开发等细节见 [部署指南](deploy/README.md) 与

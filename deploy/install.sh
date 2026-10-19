@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# WorkBuddy Manager 一键部署脚本
+# Workbuddy Pro 一键部署脚本（Ubuntu/Debian）
 #
 # 本项目管理端依赖上游 workbuddy2api（提供账号池与 OpenAI 兼容接口）。
 # 单独 clone 本仓库是跑不起来的 —— 本脚本会自动检测并安装上游，
@@ -9,7 +9,7 @@
 # 用法：
 #   sudo bash deploy/install.sh                # 完整安装（含上游）
 #   sudo bash deploy/install.sh --skip-upstream  # 已自备 workbuddy2api
-#   sudo bash APP_DIR=/opt/custom bash deploy/install.sh
+#   sudo APP_DIR=/opt/custom bash deploy/install.sh
 #
 # 上游源码从哪来（按优先级）：
 #   1) 发布包里自带的 upstream/             下载 Release 包时已内嵌，离线可装
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 # ── 可配置项（均可用环境变量覆盖）─────────────────────────
-APP_DIR="${APP_DIR:-/opt/workbuddy-manager}"
+APP_DIR="${APP_DIR:-}"
 UPSTREAM_DIR="${UPSTREAM_DIR:-/opt/workbuddy2api}"
 # 上游原仓库 Sliverkiss/workbuddy2api 自 2026-09-23 起已不可访问（404）。
 # 默认值保留原地址只为「已有副本的人不必改代码」；新装请用 UPSTREAM_SRC
@@ -32,7 +32,7 @@ UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/Sliverkiss/workbuddy2api.git}
 UPSTREAM_SRC="${UPSTREAM_SRC:-}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-7863}"
 MANAGER_PORT="${MANAGER_PORT:-7864}"
-PY="${PY:-/usr/bin/python3}"
+PY="${PY:-}"
 SKIP_UPSTREAM=0
 
 for arg in "$@"; do
@@ -42,6 +42,7 @@ for arg in "$@"; do
       sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
+    *) printf '未知参数：%s\n' "$arg" >&2; exit 1 ;;
   esac
 done
 
@@ -59,10 +60,15 @@ step "0/4 环境预检"
 
 [ "$(id -u)" -eq 0 ] || die "请用 root 运行（sudo bash deploy/install.sh）"
 
-command -v "$PY" >/dev/null 2>&1 || die "未找到 python3（$PY）"
+[ -f "$SRC_DIR/deploy/bootstrap.sh" ] || die "部署包缺少 deploy/bootstrap.sh，请重新下载完整的 Release 包"
+source "$SRC_DIR/deploy/bootstrap.sh"
+if [[ ${WB_BOOTSTRAP_PREPARED:-0} == 1 ]]; then
+  wb_detect_system
+  wb_python_ok "$PY" || die "需要 Python 3.11+ 和 venv"
+else
+  wb_prepare_system "$SKIP_UPSTREAM"
+fi
 PYVER="$("$PY" -c 'import sys;print("%d.%d"%sys.version_info[:2])')"
-"$PY" -c 'import sys;sys.exit(0 if sys.version_info>=(3,9) else 1)' \
-  || die "Python 版本过低（需 ≥3.9，当前 ${PYVER}）"
 ok "Python ${PYVER}"
 
 # 安装包摘要提示（不判断、不阻断）────────────────────────────
@@ -76,21 +82,15 @@ for _pkg in $(find . -maxdepth 1 -name 'workbuddy-*.tar.gz' -print 2>/dev/null);
 done
 
 HAVE_DOCKER=0
-if command -v docker >/dev/null 2>&1; then
+COMPOSE="docker compose"
+if [ "$SKIP_UPSTREAM" -ne 1 ] && command -v docker >/dev/null 2>&1; then
   HAVE_DOCKER=1
   DOCKER_VER="$(docker --version | awk '{print $3}' | tr -d ,)"
   ok "Docker ${DOCKER_VER}"
-  # 优先 compose v2，退化到 docker-compose v1
-  if docker compose version >/dev/null 2>&1; then
-    COMPOSE="docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE="docker-compose"
-  else
-    die "未找到 docker compose（请安装 docker-compose-plugin）"
-  fi
+  docker compose version >/dev/null 2>&1 || die "Docker Compose 不可用"
   ok "Compose: ${COMPOSE}"
 else
-  warn "未检测到 Docker"
+  [ "$SKIP_UPSTREAM" -eq 1 ] || die "Docker 安装失败"
 fi
 
 check_port() {
@@ -108,15 +108,15 @@ step "1/4 上游 workbuddy2api"
 if [ "$SKIP_UPSTREAM" -eq 1 ]; then
   info "按参数要求跳过（--skip-upstream）"
 elif [ "$HAVE_DOCKER" -eq 0 ]; then
-  warn "无 Docker，跳过上游安装。请自行部署 workbuddy2api 于 :${UPSTREAM_PORT}"
+  die "Docker 未就绪，上游无法部署"
 elif [ -f "${UPSTREAM_DIR}/config.json" ]; then
   ok "已存在上游部署（${UPSTREAM_DIR}），保留现有配置与账号"
   if [ -d "${UPSTREAM_DIR}/.git" ]; then
     info "如需升级上游：cd ${UPSTREAM_DIR} && git pull && ${COMPOSE} up -d --build"
   fi
   # 确保容器在运行
-  ( cd "$UPSTREAM_DIR" && $COMPOSE up -d ) >/dev/null 2>&1 || \
-    warn "上游容器启动失败，请检查：cd ${UPSTREAM_DIR} && ${COMPOSE} logs"
+  ( cd "$UPSTREAM_DIR" && $COMPOSE up -d ) || \
+    die "上游容器启动失败，请检查：cd ${UPSTREAM_DIR} && ${COMPOSE} logs"
 else
   info "未检测到上游部署，开始安装到 ${UPSTREAM_DIR}"
 
@@ -229,19 +229,27 @@ PYEOF
   info "构建并启动上游容器（首次构建需数分钟）"
   $COMPOSE up -d --build
 
-  info "等待上游就绪…"
+fi
+
+if [ "$SKIP_UPSTREAM" -ne 1 ]; then
+  info "等待上游进程响应…"
+  UPSTREAM_READY=0
   for i in $(seq 1 60); do
-    if curl -sf -m 3 "http://127.0.0.1:${UPSTREAM_PORT}/healthz" >/dev/null 2>&1; then
-      ok "上游已就绪（http://127.0.0.1:${UPSTREAM_PORT}）"
+    # A fresh account pool returns HTTP 503. Its JSON still identifies a live
+    # upstream, so accept that state and let the user add accounts in the UI.
+    if curl -sS -m 3 "http://127.0.0.1:${UPSTREAM_PORT}/healthz" 2>/dev/null \
+      | "$PY" -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("service")=="workbuddy2api" else 1)' 2>/dev/null; then
+      UPSTREAM_READY=1
+      ok "上游已启动；首次使用请在面板添加账号"
       break
     fi
-    [ "$i" -eq 60 ] && warn "等待超时，请查看：cd ${UPSTREAM_DIR} && ${COMPOSE} logs"
     sleep 2
   done
+  [ "$UPSTREAM_READY" -eq 1 ] || die "上游未响应，请查看：cd ${UPSTREAM_DIR} && ${COMPOSE} logs"
 fi
 
 # ── 2. 安装管理端 ─────────────────────────────────────────
-step "2/4 管理端 WorkBuddy Manager"
+step "2/4 管理端 Workbuddy Pro"
 
 mkdir -p "${APP_DIR}/data"
 
@@ -258,11 +266,11 @@ fi
 
 # 静态前端：优先用发布包内的 web/out；否则尝试本地构建
 mkdir -p "${APP_DIR}/web"
-if [ -f "${APP_DIR}/web/out/index.html" ]; then
-  ok "已包含构建好的前端（web/out）"
-elif [ -d "${SRC_DIR}/web/out" ]; then
-  cp -r "${SRC_DIR}/web/out" "${APP_DIR}/web/"
-  ok "已复制前端产物"
+if [ -f "${SRC_DIR}/web/out/index.html" ]; then
+  if [ "${SRC_DIR}" != "${APP_DIR}" ]; then
+    cp -r "${SRC_DIR}/web/out" "${APP_DIR}/web/"
+  fi
+  ok "已同步前端产物"
 elif [ -f "${SRC_DIR}/web/package.json" ]; then
   warn "未找到前端产物，尝试本地构建"
   if command -v npm >/dev/null 2>&1; then
@@ -277,25 +285,17 @@ else
 fi
 
 # 写入版本标记（供界面显示当前版本）
-if [ -f "${APP_DIR}/.version" ]; then
-  ok "版本标记：$(cat "${APP_DIR}/.version")"
-elif [ -f "${SRC_DIR}/.version" ]; then
+if [ -f "${SRC_DIR}/.version" ] && [ "${SRC_DIR}" != "${APP_DIR}" ]; then
   cp "${SRC_DIR}/.version" "${APP_DIR}/.version"
 fi
+[ ! -f "${APP_DIR}/.version" ] || ok "版本标记：$(cat "${APP_DIR}/.version")"
 
 info "安装 Python 依赖"
-"$PY" -m venv "${APP_DIR}/venv" 2>/dev/null || true
-if [ -x "${APP_DIR}/venv/bin/pip" ]; then
-  "${APP_DIR}/venv/bin/pip" install -q --upgrade pip
-  "${APP_DIR}/venv/bin/pip" install -q -r "${APP_DIR}/server/requirements.txt"
-  RT_PY="${APP_DIR}/venv/bin/python"
-  ok "依赖已装入 venv"
-else
-  "$PY" -m pip install -q --break-system-packages -r "${APP_DIR}/server/requirements.txt" 2>/dev/null \
-    || "$PY" -m pip install -q -r "${APP_DIR}/server/requirements.txt"
-  RT_PY="$PY"
-  ok "依赖已装入系统 Python"
-fi
+"$PY" -m venv "${APP_DIR}/venv" || die "创建项目虚拟环境失败"
+RT_PY="${APP_DIR}/venv/bin/python"
+"$RT_PY" -m pip install -q --upgrade pip
+"$RT_PY" -m pip install -q -r "${APP_DIR}/server/requirements.txt"
+ok "依赖已装入项目虚拟环境"
 
 info "注册 systemd 服务"
 sed -e "s#/opt/workbuddy-manager#${APP_DIR}#g" \
@@ -313,7 +313,8 @@ if [ "$RT_PY" != "$PY" ]; then
 fi
 
 systemctl daemon-reload
-systemctl enable --now workbuddy-web >/dev/null 2>&1
+systemctl enable workbuddy-web >/dev/null
+systemctl restart workbuddy-web
 
 # 等初始密码那几行真正出现在日志里，而不是死等固定秒数。
 #
@@ -333,6 +334,7 @@ _admin_pwd=""
 for _i in $(seq 1 "$ADMIN_PWD_WAIT"); do
   _admin_pwd="$(_admin_pwd_log || true)"
   [ -n "$_admin_pwd" ] && break
+  [ -f "${APP_DIR}/data/users.json" ] && break
   systemctl is-active --quiet workbuddy-web || break   # 服务已挂，等下去也没意义
   sleep 1
 done
@@ -340,15 +342,16 @@ done
 systemctl is-active --quiet workbuddy-web && ok "服务已启动" || {
   warn "服务未正常运行，最近日志："
   journalctl -u workbuddy-web -n 20 --no-pager || true
+  die "管理端服务启动失败"
 }
 
 # ── 3. 验证 ───────────────────────────────────────────────
 step "3/4 验证"
 
-if curl -sf -m 5 "http://127.0.0.1:${MANAGER_PORT}/api/healthz" >/dev/null 2>&1; then
+if curl -fsS -m 5 --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:${MANAGER_PORT}/api/healthz" >/dev/null 2>&1; then
   ok "管理端 http://127.0.0.1:${MANAGER_PORT} 可访问"
 else
-  warn "管理端未响应，请查看：journalctl -u workbuddy-web -n 50"
+  die "管理端未响应，请查看：journalctl -u workbuddy-web -n 50"
 fi
 
 if curl -sf -m 5 "http://127.0.0.1:${MANAGER_PORT}/healthz" >/dev/null 2>&1; then

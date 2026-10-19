@@ -137,7 +137,7 @@ More screenshots: [full gallery](docs/screenshots.md).
 
 On Windows, download `WorkbuddyProSetup.exe` from [Releases](https://github.com/kerntau/workbuddy-pro/releases), run the installer and start the project.
 
-For a server, Docker with 1 vCPU / 1 GB is enough. Pick one:
+On Ubuntu / Debian servers, the deployment script installs all dependencies. Pick one:
 
 **① Docker (run the container yourself)**
 
@@ -147,16 +147,19 @@ cd workbuddy-pro
 docker compose up -d --build
 ```
 
-**② Server release package (dependencies and systemd)**
+**② Ubuntu / Debian automatic deployment (recommended)**
 
-Download the `.tar.gz` from [Releases](https://github.com/kerntau/workbuddy-pro/releases), check its SHA-256, extract it, and run from the extracted directory:
+Run on a server with systemd (x86_64 / ARM64):
 
 ```bash
-sudo bash deploy/install.sh
+sudo bash -c 'set -e; apt-get update; apt-get install -y curl ca-certificates; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL --retry 3 https://raw.githubusercontent.com/kerntau/workbuddy-pro/main/deploy/bootstrap.sh -o "$f"; bash "$f"'
 ```
 
-Then open `http://<your-server>:7864`; the initial admin password is printed in the first
-startup log.
+This installs Python 3.11+, Docker, Compose and system packages; downloads and verifies the latest Release; starts both services and enables startup at boot. Python, Docker and Node.js do not need to be preinstalled. An older system Python is left intact; the project gets its own Python 3.12 runtime.
+
+Allow TCP `7864` in your cloud security group, then open `http://<your-public-IP>:7864`. The username is `admin`; read the initial password with `sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt`. Existing `/opt/workbuddy-manager` installations are reused, with their actual path printed. Reruns preserve configuration and accounts.
+
+Alternatively, download the `.tar.gz` from [Releases](https://github.com/kerntau/workbuddy-pro/releases/latest), verify its checksum, extract it, and run `sudo bash deploy/install.sh`. It also installs dependencies automatically. The initial upstream build requires internet access and takes a few minutes.
 
 > The upstream source ships inside the release package, so a fresh install just works.
 > Reverse proxy / HTTPS, port hardening, Windows (no Docker) and local development are

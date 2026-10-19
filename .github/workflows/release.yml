@@ -173,6 +173,8 @@ jobs:
           # 平台扩展属性，避免无意义的字节差异。
           rm -f "${STAGE}.zip"
           zip -qrX "${STAGE}.zip" "$STAGE"
+          sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+          sha256sum "${STAGE}.zip" > "${STAGE}.zip.sha256"
           ls -lh "${STAGE}.tar.gz" "${STAGE}.zip"
           echo "打包完成"
 
@@ -322,7 +324,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             if [ "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "true" ]; then
               echo "Release $TAG 还是草稿，覆盖产物"
-              gh release upload "$TAG" "${STAGE}.tar.gz" "${STAGE}.zip" --clobber
+              gh release upload "$TAG" "${STAGE}.tar.gz" "${STAGE}.zip" "${STAGE}.tar.gz.sha256" "${STAGE}.zip.sha256" --clobber
             else
               # **已发布的 Release 绝不覆盖产物**：发布说明里印着 sha256，用户侧的
               # 更新器就是拿它核对的 —— 换掉字节流等于让所有人的更新校验失败
@@ -339,7 +341,7 @@ jobs:
               --draft \
               --title "Workbuddy Pro $TAG" \
               --notes-file RELEASE_NOTES.md \
-              "${STAGE}.tar.gz" "${STAGE}.zip"
+              "${STAGE}.tar.gz" "${STAGE}.zip" "${STAGE}.tar.gz.sha256" "${STAGE}.zip.sha256"
           fi
           echo ""
           echo "== 发版收尾 =="

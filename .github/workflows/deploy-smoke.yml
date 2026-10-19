@@ -1,0 +1,87 @@
+name: Linux deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published release to verify (empty uses latest)'
+        required: false
+        type: string
+  push:
+    branches: [main]
+    paths: ['deploy/bootstrap.sh', 'deploy/install.sh', 'server/tests/test_bootstrap.py', '.github/workflows/deploy-smoke.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  script-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          bash -n deploy/bootstrap.sh deploy/install.sh
+          python3 -m unittest server.tests.test_bootstrap -v
+
+  clean-dependencies:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04', 'debian:12', 'debian:13']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies in a clean OS
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" "$IMAGE" bash -euxc '
+            # Package-only check: the VM job below verifies systemd and daemons.
+            mkdir -p /run/systemd/system
+            printf "#!/bin/sh\nexit 101\n" > /usr/sbin/policy-rc.d
+            chmod +x /usr/sbin/policy-rc.d
+            apt-get update
+            apt-get install -y --no-install-recommends systemd
+            source /src/deploy/bootstrap.sh
+            wb_prepare_docker() { wb_install_docker; docker --version; docker compose version; }
+            APP_DIR=/opt/workbuddy-pro
+            wb_prepare_system 0
+            "$PY" -m venv /tmp/test-venv
+            /tmp/test-venv/bin/python -c "import sys; assert sys.version_info >= (3,11)"
+            docker compose version
+          '
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy published package through the real entry point
+        env:
+          WB_VERSION: ${{ inputs.release_tag }}
+        run: |
+          sudo env WB_VERSION="$WB_VERSION" bash deploy/bootstrap.sh
+          curl -fsS http://127.0.0.1:7864/api/healthz
+          curl -fsS http://127.0.0.1:7864/login/ | grep -q 'Workbuddy Pro'
+          sudo systemctl is-enabled workbuddy-web
+          sudo test -s /opt/workbuddy-pro/data/initial-admin-password.txt
+          sudo docker ps --format '{{.Ports}}' | grep '127.0.0.1:7863->7863/tcp'
+      - name: Rerun and verify persisted data and frontend refresh
+        env:
+          WB_VERSION: ${{ inputs.release_tag }}
+        run: |
+          sudo sha256sum /opt/workbuddy-pro/data/users.json /opt/workbuddy2api/config.json > /tmp/before.sha256
+          printf 'preserved=yes\n' | sudo tee /opt/workbuddy-pro/.env >/dev/null
+          printf 'stale frontend' | sudo tee /opt/workbuddy-pro/web/out/index.html >/dev/null
+          sudo env WB_VERSION="$WB_VERSION" bash deploy/bootstrap.sh
+          sudo sha256sum -c /tmp/before.sha256
+          sudo grep -q 'preserved=yes' /opt/workbuddy-pro/.env
+          curl -fsS http://127.0.0.1:7864/ | grep -q 'Workbuddy Pro'
+          curl -fsS http://127.0.0.1:7864/api/healthz
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          sudo systemctl status workbuddy-web --no-pager || true
+          # Avoid dumping first-start logs, which contain the generated password.
+          sudo docker ps -a
+          sudo docker logs --tail 40 workbuddy2api || true
