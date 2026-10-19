@@ -6,7 +6,7 @@ namespace WorkBuddyLauncher
     /// 应用级常量与固定路径。
     internal static class LauncherPaths
     {
-        public const string AppName = "WorkBuddy Manager";
+        public const string AppName = "Workbuddy Pro";
         public const string AppExeName = "WorkBuddyManager.exe";
         public const string UninstallExeName = "Uninstall.exe";
         public const string UninstallRegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WorkBuddyManager";
@@ -66,7 +66,7 @@ namespace WorkBuddyLauncher
             }
         }
 
-        /// 开始菜单的程序组目录（%APPDATA%\Microsoft\Windows\Start Menu\Programs\WorkBuddy Manager）。
+        /// 开始菜单的程序组目录（%APPDATA%\Microsoft\Windows\Start Menu\Programs\Workbuddy Pro）。
         public static string StartMenuFolder
         {
             get

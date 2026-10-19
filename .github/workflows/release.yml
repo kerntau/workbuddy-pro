@@ -27,6 +27,11 @@ on:
         description: '要构建的 tag（如 v1.0.0）'
         required: true
         type: string
+      build_images:
+        description: '同时构建并推送 Docker 镜像（可选）'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -137,7 +142,7 @@ jobs:
           #   · 升级：update.py 把它同步进上游目录（保留 config/auths/data）
           # 取不到**不致命**（网络抖动、载体未建）：记一条醒目日志继续打包，
           # 用户仍可用 UPSTREAM_SRC 自己指定源码。
-          UPSTREAM_SRC_URL="${UPSTREAM_SRC_URL:-https://github.com/${{ github.repository }}/releases/download/upstream-src/workbuddy2api-src.tar.gz}"
+          UPSTREAM_SRC_URL="${UPSTREAM_SRC_URL:-https://github.com/ithtelab/workbuddy-manager/releases/download/upstream-src/workbuddy2api-src.tar.gz}"
           mkdir -p "$STAGE/upstream"
           if curl -fsSL --retry 3 --retry-delay 2 --max-time 120 \
                  "$UPSTREAM_SRC_URL" -o /tmp/upstream-src.tar.gz \
@@ -359,10 +364,10 @@ jobs:
       - name: 解析镜像名
         # GHCR 要求仓库名全小写，而 repository_owner 可能含大写。
         # build-push-action 的 tags 里没法做大小写转换，先在这里算好。
-        if: github.event_name == 'push' || inputs.tag != ''
+        if: inputs.build_images == true
         id: image
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/workbuddy-manager"
+          IMAGE="ghcr.io/${{ github.repository }}"
           echo "name=${IMAGE,,}" >> $GITHUB_OUTPUT
 
       # 下面这几步与镜像构建同属「附属产物」链路，一并加 continue-on-error：
@@ -371,17 +376,17 @@ jobs:
       - name: 设置 QEMU
         # 跨架构构建 arm64 层需要它：runner 是 amd64，模拟出 arm64 执行环境
         continue-on-error: true
-        if: github.event_name == 'push' || inputs.tag != ''
+        if: inputs.build_images == true
         uses: docker/setup-qemu-action@v3
 
       - name: 设置 Buildx
         continue-on-error: true
-        if: github.event_name == 'push' || inputs.tag != ''
+        if: inputs.build_images == true
         uses: docker/setup-buildx-action@v3
 
       - name: 登录 GHCR
         continue-on-error: true
-        if: github.event_name == 'push' || inputs.tag != ''
+        if: inputs.build_images == true
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -394,7 +399,7 @@ jobs:
         # 创建，很容易被误读成「发版失败」。加 continue-on-error 后，镜像推不上去
         # 只影响这一步，发布结果不受牵连。
         continue-on-error: true
-        if: github.event_name == 'push' || inputs.tag != ''
+        if: inputs.build_images == true
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -454,10 +459,11 @@ jobs:
           sudo bash deploy/install.sh
           ```
 
-          或者用容器部署（另见仓库内 docker-compose.yml）：
+          容器部署可在源码目录运行（另见仓库内 docker-compose.yml）：
           ```bash
-          docker pull ghcr.io/${{ github.repository_owner }}/workbuddy-manager:${{ steps.vars.outputs.version }}
+          docker compose up -d --build
           ```
+          需要预构建镜像时，请手动运行工作流并启用 build_images。
           EOF
 
   # ── Windows 安装器（单文件 exe，随包分发给桌面用户）────────────────────
@@ -505,14 +511,14 @@ jobs:
         if: steps.check.outputs.has_launcher == 'true'
         shell: pwsh
         run: |
-          $exe = 'windows/launcher/dist/WorkBuddyManagerSetup.exe'
+          $exe = 'windows/launcher/dist/WorkbuddyProSetup.exe'
           if (-not (Test-Path $exe)) { throw '构建脚本没有产出安装器' }
           $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
           $size = (Get-Item $exe).Length
           "安装器：$exe（{0:N1} MB）" -f ($size / 1MB) | Tee-Object -Append -FilePath $env:GITHUB_STEP_SUMMARY
           "sha256：$hash" | Tee-Object -Append -FilePath $env:GITHUB_STEP_SUMMARY
           # 同名 .sha256 文本随资产一起发，用户下载后可以自己核对
-          "$hash  WorkBuddyManagerSetup.exe" | Set-Content -Encoding ascii "$exe.sha256"
+          "$hash  WorkbuddyProSetup.exe" | Set-Content -Encoding ascii "$exe.sha256"
           "installer_exe=$exe" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
         id: hash
 
@@ -523,12 +529,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ needs.release.outputs.tag }}"
-          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx 'WorkBuddyManagerSetup.exe'; then
-            echo "Release $TAG 上已有 WorkBuddyManagerSetup.exe —— 不覆盖（换掉同名资产会让已下载的人对不上摘要）"
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx 'WorkbuddyProSetup.exe'; then
+            echo "Release $TAG 上已有 WorkbuddyProSetup.exe —— 不覆盖（换掉同名资产会让已下载的人对不上摘要）"
             echo "  确需重出：先删掉该资产（gh release delete-asset）再重跑本作业"
             exit 0
           fi
           gh release upload "$TAG" \
-            windows/launcher/dist/WorkBuddyManagerSetup.exe \
-            windows/launcher/dist/WorkBuddyManagerSetup.exe.sha256
+            windows/launcher/dist/WorkbuddyProSetup.exe \
+            windows/launcher/dist/WorkbuddyProSetup.exe.sha256
           echo "已上传 Windows 安装器（含 .sha256）"

@@ -29,7 +29,7 @@ namespace WorkBuddyLauncher
         private bool _keepData;
 
         public UninstallForm()
-            : base("卸载 " + LauncherPaths.AppName, "WorkBuddy Manager 卸载向导")
+            : base("卸载 " + LauncherPaths.AppName, "Workbuddy Pro 卸载向导")
         {
             _installDir = Path.GetDirectoryName(Application.ExecutablePath);
 
@@ -122,7 +122,7 @@ namespace WorkBuddyLauncher
             if (!LauncherPaths.LooksInstalled(_installDir))
             {
                 MessageBox.Show(this,
-                    "未在安装目录内检测到 WorkBuddy Manager。\n请在开始菜单或安装目录里运行「卸载 WorkBuddy Manager」。",
+                    "未在安装目录内检测到 Workbuddy Pro。\n请在开始菜单或安装目录里运行「卸载 Workbuddy Pro」。",
                     "卸载", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }

@@ -1,6 +1,6 @@
-﻿# WorkBuddy Manager —— Windows 安装包构建脚本
+﻿# Workbuddy Pro —— Windows 安装包构建脚本
 #
-# 从源码构建单文件安装器 WorkBuddyManagerSetup.exe（内嵌可运行的项目、
+# 从源码构建单文件安装器 WorkbuddyProSetup.exe（内嵌可运行的项目、
 # 预置 Python 运行时与上游网关二进制，目标机零环境要求）。
 #
 # 第三方来源与发布注意事项：
@@ -602,16 +602,16 @@ $iconPath = Join-Path $repoRoot 'web\public\favicon\favicon.ico'
 if (-not (Test-Path $iconPath)) { throw '缺少图标文件：web\public\favicon\favicon.ico' }
 
 New-Item -ItemType Directory $distDir -Force | Out-Null
-$outExe = Join-Path $distDir 'WorkBuddyManagerSetup.exe'
+$outExe = Join-Path $distDir 'WorkbuddyProSetup.exe'
 if (Test-Path $outExe) { Remove-Item $outExe -Force }
 
 # 生成程序集元数据，写入 exe 的文件属性版本号
 $assemblyInfoPath = Join-Path $env:TEMP ('wb-assembly-info-' + [Guid]::NewGuid().ToString('N') + '.cs')
 $assemblyInfo = @"
 using System.Reflection;
-[assembly: AssemblyTitle("WorkBuddy Manager")]
-[assembly: AssemblyProduct("WorkBuddy Manager")]
-[assembly: AssemblyCompany("WorkBuddy Manager")]
+[assembly: AssemblyTitle("Workbuddy Pro")]
+[assembly: AssemblyProduct("Workbuddy Pro")]
+[assembly: AssemblyCompany("Workbuddy Pro")]
 [assembly: AssemblyVersion("$assemblyVersion")]
 [assembly: AssemblyFileVersion("$assemblyVersion")]
 [assembly: AssemblyInformationalVersion("$version")]
@@ -639,7 +639,7 @@ $exeMB = [math]::Round((Get-Item $outExe).Length / 1MB, 1)
 $exeHash = Get-FileSha256 $outExe
 [System.IO.File]::WriteAllText(
     ($outExe + '.sha256'),
-    ($exeHash + '  WorkBuddyManagerSetup.exe' + [Environment]::NewLine),
+    ($exeHash + '  WorkbuddyProSetup.exe' + [Environment]::NewLine),
     (New-Object System.Text.ASCIIEncoding))
 Remove-Item $stageDir -Recurse -Force -ErrorAction SilentlyContinue
 

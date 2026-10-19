@@ -1,6 +1,6 @@
 # Windows 启动脚本
 
-双击或命令行运行这里的脚本，管理**本机原生部署**的 WorkBuddy Manager
+双击或命令行运行这里的脚本，管理**本机原生部署**的 Workbuddy Pro
 （Docker 部署用不到它们，见仓库根目录的 `docker-compose.yml`）。
 
 | 脚本 | 作用 |
@@ -46,8 +46,8 @@ v1.0.86 起发布包不再带 `.sig`，仓库里的 `update.ps1` 也从「验签
 | 产物 | 作用 |
 |---|---|
 | `build.ps1` | 从源码构建安装包：组装 payload、编译上游 `wb2api.exe`（本机无 Go 时自动下载便携工具链）、预置 Python 3.11 运行时与依赖、csc 编译 |
-| `dist\WorkBuddyManagerSetup.exe` | 双击进入安装向导：选择目录安装、生成桌面与开始菜单快捷方式、注册「设置 → 应用」卸载入口 |
-| `dist\WorkBuddyManagerSetup.exe.sha256` | 安装包的 SHA-256（与 CI 产物同构）；分发后可用 `certutil -hashfile WorkBuddyManagerSetup.exe SHA256` 核对 |
+| `dist\WorkbuddyProSetup.exe` | 双击进入安装向导：选择目录安装、生成桌面与开始菜单快捷方式、注册「设置 → 应用」卸载入口 |
+| `dist\WorkbuddyProSetup.exe.sha256` | 安装包的 SHA-256（与 CI 产物同构）；分发后可用 `certutil -hashfile WorkbuddyProSetup.exe SHA256` 核对 |
 | 安装目录里的 `WorkBuddyManager.exe` | 控制窗口：启动 / 重启 / 关闭项目、运行状态、修改监听 IP 与端口、打开面板；点 X 可选最小化到托盘或退出（可记住选择） |
 | 安装目录里的 `Uninstall.exe` | 卸载程序：停止服务、清理快捷方式与注册表，可选保留账号与配置数据 |
 
@@ -76,7 +76,7 @@ powershell -ExecutionPolicy Bypass -File windows\launcher\build.ps1
 ### 发布资产、第三方来源与安全提示
 
 发版时 `.github/workflows/release.yml` 会跑两个作业：Ubuntu 上打 `.tar.gz` / `.zip`
-发布包，Windows 上（`installer` 作业）构建并上传 `WorkBuddyManagerSetup.exe` 与它的
+发布包，Windows 上（`installer` 作业）构建并上传 `WorkbuddyProSetup.exe` 与它的
 `.sha256`。构建脚本自己取依赖，所以不需要在 runner 上预装 Go 或 Python。
 
 **该资产偶尔会缺失**：Windows 作业失败时它不会出现在 Release 里（发布包本身不受影响），
@@ -106,8 +106,8 @@ powershell -ExecutionPolicy Bypass -File windows\launcher\build.ps1
 应用内的 `update.ps1` 只更新项目代码、前端和依赖，并保护本机 Windows 脚本；它**不会
 自更新 `WorkBuddyManager.exe` / `Uninstall.exe`**。升级安装器本身的步骤是：
 
-1. 停止正在运行的 WorkBuddy Manager。
-2. 从新版本 Release 下载新的 `WorkBuddyManagerSetup.exe`，或在源码分支重新构建。
+1. 停止正在运行的 Workbuddy Pro。
+2. 从新版本 Release 下载新的 `WorkbuddyProSetup.exe`，或在源码分支重新构建。
 3. 运行新的安装器并选择原安装目录，确认覆盖安装。
 4. 覆盖安装会保留 `.env`、`data`、`upstream\auths` 和 `upstream\config.json`；
    新的启动器与卸载程序会覆盖旧版本。

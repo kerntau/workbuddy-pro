@@ -153,7 +153,7 @@ class AccountProxyTest(unittest.TestCase):
         self.assertNotIn('proxy.example', str(ctx.exception))
 
     def test_socks5_routes_are_accepted(self):
-        """住宅代理服务商给的凭据常常就是 socks5 写法（实测 ProxyLane 如此），
+        """代理服务商给的凭据可能使用 socks5 写法，
         线路表里要能直接填 —— 此前只认 http/https，填 socks5 会在调用时才报
         「配置无效」。socks5h（域名解析交给代理）同样放行。"""
         self.cfg.write_text(json.dumps({'proxies': {

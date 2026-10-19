@@ -34,7 +34,7 @@ namespace WorkBuddyLauncher
                 {
                     if (!createdNew)
                     {
-                        MessageBox.Show("WorkBuddy Manager 控制窗口已经在运行中。", LauncherPaths.AppName,
+                        MessageBox.Show("Workbuddy Pro 控制窗口已经在运行中。", LauncherPaths.AppName,
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }

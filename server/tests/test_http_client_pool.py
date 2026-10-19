@@ -182,7 +182,7 @@ class ProxySchemeSupportTest(unittest.TestCase):
 
     为什么单独钉：socks5 支持**完全依赖一个可选依赖** —— httpx 没装 socksio 时，
     **构造客户端就抛** `ImportError: Using SOCKS proxy, but the 'socksio' package is
-    not installed`。而住宅代理服务商给凭据时常常直接给 socks5://（实测 ProxyLane
+    not installed`。而代理服务商给凭据时可能直接给 socks5://（例如服务商
     就是），用户照抄就撞上这句「看起来像自己少装了东西」的报错。
 
     所以这里两条一起钉：依赖必须声明在 requirements 里，且三种协议都能构造出客户端。

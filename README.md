@@ -1,6 +1,6 @@
 <div align="center">
 
-# WorkBuddy Manager
+# Workbuddy Pro
 
 **腾讯 CodeBuddy 账号池管理控制台 · OpenAI 兼容反代网关**
 
@@ -11,23 +11,34 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-22c55e)
 
-[![Release](https://img.shields.io/github/v/release/ithtelab/workbuddy-manager?color=22c55e&label=Release)](https://github.com/ithtelab/workbuddy-manager/releases)
+[![Release](https://img.shields.io/badge/Release-Downloads-22c55e)](https://github.com/kerntau/workbuddy-pro/releases)
 [![Changelog](https://img.shields.io/badge/更新日志-CHANGELOG-blue)](CHANGELOG.md)
-[![Issues](https://img.shields.io/github/issues/ithtelab/workbuddy-manager?color=f59e0b&label=反馈)](https://github.com/ithtelab/workbuddy-manager/issues)
+[![Issues](https://img.shields.io/badge/Feedback-Issues-f59e0b)](https://github.com/kerntau/workbuddy-pro/issues)
 
-[English](README.en.md) · **简体中文** ｜ 本项目在 [LINUX DO](https://linux.do) 社区发布与交流
+[English](README.en.md) · **简体中文**
 
-<a href="https://proxylane.dev/?utm_source=workbuddy-manager&utm_medium=partnership&utm_campaign=workbuddy-manager_sponsor_202610&utm_content=github_readme"><img src="docs/images/sponsor-proxylane.png" alt="ProxyLane（赞助位）" width="100%" /></a>
-
-**赞助商**：[ProxyLane](https://proxylane.dev/?utm_source=workbuddy-manager&utm_medium=partnership&utm_campaign=workbuddy-manager_sponsor_202610&utm_content=github_readme) 住宅代理，覆盖 195 个国家，95%+ IP 获 Scamalytics 低风险评级。在 `WB_HTTP_PROXY` 的用户名里写上国家、城市和会话名，每个实例走一个住宅 IP，最长 72 小时不变，换 IP 也留在同一城市。
-
-首次购买使用优惠码 `WORKBUDDY30` 享 7 折。
-
-<img src="docs/images/dashboard.png" alt="WorkBuddy Manager 仪表盘" width="100%" />
+<img src="docs/images/dashboard.png" alt="Workbuddy Pro 仪表盘" width="100%" />
 
 **界面预览**
 
 </div>
+
+---
+
+## Workbuddy Pro 版本说明
+
+本项目基于 [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager)（MIT）定制，保留原作者版权和第三方许可。
+
+- 使用 Workbuddy Pro 名称与自定义 Logo、favicon。
+- 登录表单默认隐藏，**点击 Logo 10 次**弹出；关闭后重新计数，刷新后恢复隐藏。
+- 中英文说明已移除赞助横幅、推广链接与优惠码。
+- 本分支源码、问题反馈与发布包均在 [kerntau/workbuddy-pro](https://github.com/kerntau/workbuddy-pro) 维护。
+
+登录入口仍需要原有管理员账号和密码。首次启动的密码保存在 `data/initial-admin-password.txt`，请勿将 `data/`、`.env` 或上游账号文件上传到仓库。
+
+安装包从本仓库的 [Releases](https://github.com/kerntau/workbuddy-pro/releases) 获取。仓库为私有时，下载前需登录有访问权限的 GitHub 账号；无法在线更新时，可下载发布包后使用面板的离线更新。
+
+发布包沿用 `workbuddy-manager-vX.Y.Z.tar.gz` / `.zip` 命名，以兼容现有更新器；Windows 图形安装器名为 `WorkbuddyProSetup.exe`。构建和发布步骤见[开发与部署细节](docs/development.md#workbuddy-pro-发布)。
 
 ---
 
@@ -58,7 +69,7 @@
 - **上游专注自己的核心**：面板不要求上游为它改代码，让上游能保持精简
 
 欢迎参与共建：面板与上游源码的问题、想法都提到
-[本仓库](https://github.com/ithtelab/workbuddy-manager/issues)
+[本仓库](https://github.com/kerntau/workbuddy-pro/issues)
 （上游源码随本项目的发布包分发）。
 
 ---
@@ -121,8 +132,8 @@
 
 **① Windows 安装器（桌面图形化，无需 Docker / 命令行）**
 
-1. 从该版本 [Release](https://github.com/ithtelab/workbuddy-manager/releases) 下载
-   `WorkBuddyManagerSetup.exe`（发版时由 CI 在 Windows runner 上自动构建并附带，同目录还有
+1. 从该版本 [Release](https://github.com/kerntau/workbuddy-pro/releases) 下载
+   `WorkbuddyProSetup.exe`（发版时由 CI 在 Windows runner 上自动构建并附带，同目录还有
    一个 `.sha256` 可核对）。v1.0.88 的安装器曾因卸载会误删文件被下线（见该版本 Release
    说明），**v1.0.89 起已修复**：卸载只删程序自己的文件，安装目录也改成「选中目录 +
    `WorkBuddyManager` 子目录」。
@@ -135,19 +146,23 @@
 > 目标机器**无需安装任何依赖**，Windows 10 (1903+) / 11 双击即用。当前安装器没有
 > Authenticode 签名，SmartScreen 可能显示警告；请确认文件来自可信 Release 或自行构建。
 > 安装器自身不会自动升级，升级时重新获取新 exe 并覆盖安装即可；`.env`、账号和 `data`
-> 等个人数据会保留。卸载：**设置 → 应用** 或开始菜单「卸载 WorkBuddy Manager」，
+> 等个人数据会保留。卸载：**设置 → 应用** 或开始菜单「卸载 Workbuddy Pro」，
 > 可选保留账号与配置。细节见 [Windows 启动器](windows/README.md#启动器安装版)。
 
 **② Docker（自己起容器）**
 
 ```bash
-docker run -d --name workbuddy-manager -p 7864:7864 -v /opt/workbuddy-manager/data:/app/data ghcr.io/ithtelab/workbuddy-manager:latest
+git clone https://github.com/kerntau/workbuddy-pro.git
+cd workbuddy-pro
+docker compose up -d --build
 ```
 
-**③ 服务器一键脚本（装依赖、拉包、配 systemd）**
+**③ 服务器部署包（装依赖、配 systemd）**
+
+从 [Releases](https://github.com/kerntau/workbuddy-pro/releases) 下载 `.tar.gz`，核对发布页 SHA-256 后解压，在解压目录运行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ithtelab/workbuddy-manager/main/deploy/install.sh)
+sudo bash deploy/install.sh
 ```
 
 装完浏览器打开 `http://<服务器>:7864`，首次启动的日志里会打印初始管理员密码。
@@ -232,13 +247,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ithtelab/workbuddy-manager/m
 ## 更新日志与反馈
 
 - **更新日志**：[CHANGELOG.md](CHANGELOG.md) —— 各版本的新增、修复与变更
-- **下载发布包**：[Releases](https://github.com/ithtelab/workbuddy-manager/releases) —— 每个版本提供可直接部署的
+- **下载发布包**：[Releases](https://github.com/kerntau/workbuddy-pro/releases) —— 每个版本提供可直接部署的
   `.tar.gz` / `.zip`（含已构建的前端产物），解压后执行 `sudo bash deploy/install.sh` 即可
-- **反馈问题**：[提交 Bug](https://github.com/ithtelab/workbuddy-manager/issues/new?template=bug_report.yml) ·
-  [功能建议](https://github.com/ithtelab/workbuddy-manager/issues/new?template=feature_request.yml)
+- **反馈问题**：[提交 Bug](https://github.com/kerntau/workbuddy-pro/issues/new?template=bug_report.yml) ·
+  [功能建议](https://github.com/kerntau/workbuddy-pro/issues/new?template=feature_request.yml)
 
 > 反馈时请附上版本号与错误日志，并**先移除其中的密钥、Token 等敏感信息**。
-> 上游 workbuddy2api 自身的问题也提到[本仓库](https://github.com/ithtelab/workbuddy-manager/issues)
+> 上游 workbuddy2api 自身的问题也提到[本仓库](https://github.com/kerntau/workbuddy-pro/issues)
 > ——上游源码随本项目的发布包分发。
 
 ### 版本发布流程
@@ -268,6 +283,7 @@ CI 会构建前端、打包产物、从 CHANGELOG 提取对应版本段落作为
 
 ## 致谢
 
+- [**ithtelab/workbuddy-manager**](https://github.com/ithtelab/workbuddy-manager)（MIT）—— 本定制版本的原项目
 - [**LINUX DO**](https://linux.do) —— 本项目的发布与交流社区
 - [**linux-do/cdk**](https://github.com/linux-do/cdk)（MIT）—— 界面设计令牌与浮动底栏组件来源，本项目 UI 视觉与其保持一致
 - [**Sliverkiss/workbuddy2api**](https://github.com/Sliverkiss/workbuddy2api) —— 底层账号池与 OpenAI 兼容代理（MIT；源码随本项目的发布包分发，版权归原作者）

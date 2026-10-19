@@ -25,7 +25,7 @@
 **不需要联网取任何外部源码**：
 
 ```bash
-wget https://github.com/ithtelab/workbuddy-manager/releases/latest/download/workbuddy-manager-<版本>.tar.gz
+wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-manager-<版本>.tar.gz
 tar xzf workbuddy-manager-*.tar.gz && cd workbuddy-manager-*
 sudo bash deploy/install.sh          # 自动使用包内的 upstream/
 ```
@@ -71,7 +71,7 @@ cd /opt/workbuddy2api && docker compose up -d --build
 
 ```bash
 # 1) 下载 Release 包（内含已构建的前端，无需 Node.js）
-wget https://github.com/ithtelab/workbuddy-manager/releases/latest/download/workbuddy-manager-<版本>.tar.gz
+wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-manager-<版本>.tar.gz
 tar xzf workbuddy-manager-*.tar.gz
 cd workbuddy-manager-*
 
@@ -94,8 +94,8 @@ sudo bash deploy/install.sh
 ## 二、通过 git clone 部署
 
 ```bash
-git clone https://github.com/ithtelab/workbuddy-manager.git
-cd workbuddy-manager
+git clone https://github.com/kerntau/workbuddy-pro.git
+cd workbuddy-pro
 
 # 需先在 web/ 构建前端（git 仓库不含构建产物）
 cd web && npm ci && npm run build:export && cd ..
@@ -523,7 +523,7 @@ ls -l /opt/workbuddy2api/auths/
 
 | 地址 | 是什么 | 怎么用 |
 |---|---|---|
-| `127.0.0.1:7864` | **WorkBuddy Manager（本管理端）** | 用浏览器打开，账号 / 密钥 / 日志 / 设置都在这里 |
+| `127.0.0.1:7864` | **Workbuddy Pro（本管理端）** | 用浏览器打开，账号 / 密钥 / 日志 / 设置都在这里 |
 | `127.0.0.1:7863` | 上游网关（workbuddy2api） | 只提供接口，用命令行或下游客户端调用 |
 
 上游真正提供的接口只有这四个：
@@ -600,8 +600,8 @@ grep api_key /opt/workbuddy2api/config.json
 前提：`workbuddy2api` 已在本机运行，并有可用的启停脚本与文件日志。
 
 ```powershell
-git clone https://github.com/ithtelab/workbuddy-manager.git
-cd workbuddy-manager
+git clone https://github.com/kerntau/workbuddy-pro.git
+cd workbuddy-pro
 Copy-Item .env.example .env
 ```
 

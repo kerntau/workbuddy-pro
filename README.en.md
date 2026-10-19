@@ -1,6 +1,6 @@
 <div align="center">
 
-# WorkBuddy Manager
+# Workbuddy Pro
 
 **Management console for Tencent CodeBuddy account pools · OpenAI-compatible gateway**
 
@@ -11,23 +11,34 @@ A web console for [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-22c55e)
 
-[![Release](https://img.shields.io/github/v/release/ithtelab/workbuddy-manager?color=22c55e&label=Release)](https://github.com/ithtelab/workbuddy-manager/releases)
+[![Release](https://img.shields.io/badge/Release-Downloads-22c55e)](https://github.com/kerntau/workbuddy-pro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG-blue)](CHANGELOG.md)
-[![Issues](https://img.shields.io/github/issues/ithtelab/workbuddy-manager?color=f59e0b&label=Issues)](https://github.com/ithtelab/workbuddy-manager/issues)
+[![Issues](https://img.shields.io/badge/Feedback-Issues-f59e0b)](https://github.com/kerntau/workbuddy-pro/issues)
 
-**English** · [简体中文](README.md) ｜ Documented and discussed in the [LINUX DO](https://linux.do) community
+**English** · [简体中文](README.md)
 
-<a href="https://proxylane.dev/?utm_source=workbuddy-manager&utm_medium=partnership&utm_campaign=workbuddy-manager_sponsor_202610&utm_content=github_readme_en"><img src="docs/images/sponsor-proxylane.png" alt="ProxyLane (sponsor)" width="100%" /></a>
-
-**Sponsor**: [ProxyLane](https://proxylane.dev/?utm_source=workbuddy-manager&utm_medium=partnership&utm_campaign=workbuddy-manager_sponsor_202610&utm_content=github_readme_en) residential proxies in 195 countries, 95%+ of IPs rated low risk by Scamalytics. Put the country, city and a session name in the `WB_HTTP_PROXY` username: each instance gets one residential IP for up to 72 hours, and a replacement IP stays in the same city.
-
-New customers get 30% off the first purchase with code `WORKBUDDY30`.
-
-<img src="docs/images/dashboard.png" alt="WorkBuddy Manager dashboard" width="100%" />
+<img src="docs/images/dashboard.png" alt="Workbuddy Pro dashboard" width="100%" />
 
 **Interface preview**
 
 </div>
+
+---
+
+## About this edition
+
+Workbuddy Pro is a custom edition of [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager), distributed under the original MIT license with its copyright and third-party notices retained.
+
+- Custom product name, login logo and favicon.
+- The login form is hidden initially. **Click the logo 10 times** to open it; closing the dialog resets the count, and reloading hides it again.
+- Sponsor banners, promotional links and discount codes have been removed from both READMEs.
+- Source code, issue reports and [releases](https://github.com/kerntau/workbuddy-pro/releases) are maintained in this repository.
+
+The existing administrator login is still required. The initial password is saved in `data/initial-admin-password.txt`. Keep `.env`, runtime data and upstream account credentials out of Git.
+
+If the repository is private, sign into a GitHub account with access before downloading a release. Use the panel's offline package update when an online update is unavailable.
+
+Release archives retain the `workbuddy-manager-vX.Y.Z.tar.gz` / `.zip` names for updater compatibility. The Windows installer is named `WorkbuddyProSetup.exe`. See [development and release instructions](docs/development.md#workbuddy-pro-发布).
 
 ---
 
@@ -66,7 +77,7 @@ it makes a capable upstream gateway visible and manageable. The two fit together
   code for it, so the upstream can stay lean
 
 Contributions are welcome: both panel and upstream-source issues and ideas belong in
-[this repository](https://github.com/ithtelab/workbuddy-manager/issues) — the original
+[this repository](https://github.com/kerntau/workbuddy-pro/issues) — the original
 upstream repo is gone, and its source is now maintained here.
 
 ---
@@ -125,18 +136,24 @@ More screenshots: [full gallery](docs/screenshots.md).
 
 ## Quick start
 
-You need a server that can run Docker (1 vCPU / 1 GB is enough). Pick one:
+On Windows, download `WorkbuddyProSetup.exe` from [Releases](https://github.com/kerntau/workbuddy-pro/releases), run the installer and start the project. Click the login logo 10 times to open the administrator login.
+
+For a server, Docker with 1 vCPU / 1 GB is enough. Pick one:
 
 **① Docker (run the container yourself)**
 
 ```bash
-docker run -d --name workbuddy-manager -p 7864:7864 -v /opt/workbuddy-manager/data:/app/data ghcr.io/ithtelab/workbuddy-manager:latest
+git clone https://github.com/kerntau/workbuddy-pro.git
+cd workbuddy-pro
+docker compose up -d --build
 ```
 
-**② One-shot installer (dependencies, package, systemd)**
+**② Server release package (dependencies and systemd)**
+
+Download the `.tar.gz` from [Releases](https://github.com/kerntau/workbuddy-pro/releases), check its SHA-256, extract it, and run from the extracted directory:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ithtelab/workbuddy-manager/main/deploy/install.sh)
+sudo bash deploy/install.sh
 ```
 
 Then open `http://<your-server>:7864`; the initial admin password is printed in the first
@@ -228,15 +245,15 @@ Threat model and hardening notes: [security notes](docs/security-notes.md) and t
 ## Changelog & feedback
 
 - **Changelog**: [CHANGELOG.md](CHANGELOG.md) — additions, fixes and changes per version
-- **Releases**: [Releases](https://github.com/ithtelab/workbuddy-manager/releases) — each
+- **Releases**: [Releases](https://github.com/kerntau/workbuddy-pro/releases) — each
   version ships a deployable `.tar.gz` / `.zip` (with the built frontend); unpack and run
   `sudo bash deploy/install.sh`
-- **Feedback**: [report a bug](https://github.com/ithtelab/workbuddy-manager/issues/new?template=bug_report.yml) ·
-  [request a feature](https://github.com/ithtelab/workbuddy-manager/issues/new?template=feature_request.yml)
+- **Feedback**: [report a bug](https://github.com/kerntau/workbuddy-pro/issues/new?template=bug_report.yml) ·
+  [request a feature](https://github.com/kerntau/workbuddy-pro/issues/new?template=feature_request.yml)
 
 > Please include the version and error logs, and **remove any keys or tokens first**.
 > For issues with the upstream workbuddy2api itself, use
-> [this repository](https://github.com/ithtelab/workbuddy-manager/issues) — the upstream
+> [this repository](https://github.com/kerntau/workbuddy-pro/issues) — the upstream
 > source ships with our releases.
 
 ### Release process

@@ -32,7 +32,7 @@ namespace WorkBuddyLauncher
         private string _installTarget;
 
         public InstallerForm()
-            : base("安装 " + LauncherPaths.AppName, "WorkBuddy Manager 安装向导 · 内置全部运行环境")
+            : base("安装 " + LauncherPaths.AppName, "Workbuddy Pro 安装向导 · 内置全部运行环境")
         {
             _pageWelcome = MakePage();
             _pageLocation = MakePage();
