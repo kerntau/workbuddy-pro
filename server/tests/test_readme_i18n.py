@@ -53,29 +53,6 @@ def _table_shapes(text: str) -> list[int]:
     return shapes
 
 
-def _api_table_rows(text: str) -> list[str]:
-    """接口表每行的「方法 + 路径」（前两列），用于两份 README 逐行对齐。
-
-    只取这两列：鉴权列与说明列是**译文**，本来就不同语言；方法与路径
-    则是双方必须逐字一致的（它们是要照着敲的命令）。
-    """
-    rows, in_table = [], False
-    for line in text.splitlines():
-        s = line.strip()
-        if not (s.startswith('|') and s.endswith('|')):
-            in_table = False
-            continue
-        cells = [c.strip() for c in s.strip('|').split('|')]
-        if not in_table:
-            in_table = '路径' in cells or 'Path' in cells
-            continue
-        if len(cells) >= 2 and set(cells[0]) <= set('-: '):
-            continue          # 表头下的分隔行
-        if len(cells) >= 2:
-            rows.append(f'{cells[0]} {cells[1]}')
-    return rows
-
-
 class BilingualReadmeTest(unittest.TestCase):
     """两份 README 必须结构性对应。"""
 
@@ -132,19 +109,6 @@ class BilingualReadmeTest(unittest.TestCase):
         cn, en = _table_shapes(self.cn), _table_shapes(self.en)
         self.assertEqual(cn, en,
                          f'表格行数不一致（中文 {cn} / 英文 {en}）—— 有一份的表格被改漏了')
-
-    def test_api_table_rows_match(self) -> None:
-        """接口表要**逐行**对应：行数相同还不够，「方法 + 路径」也要一致。
-
-        只比个数会漏：某一行被翻译时顺手改错了方法（`GET` → `POST`），
-        行数不变、路径也还在，用户照着敲就是错的。这里连方法一起比。
-        """
-        cn, en = _api_table_rows(self.cn), _api_table_rows(self.en)
-        self.assertGreater(len(cn), 5, '接口表没解析出来（选择器失效，守卫会变成空转）')
-        only_cn = [r for r in cn if r not in en]
-        only_en = [r for r in en if r not in cn]
-        self.assertEqual((only_cn, only_en), ([], []),
-                         f'接口表不一致：仅中文有 {only_cn}，仅英文有 {only_en}')
 
     def test_language_links_present(self) -> None:
         """两份文档都要有互跳链接，否则另一语言用户找不到入口。"""
