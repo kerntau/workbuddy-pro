@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   script-tests:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +25,7 @@ jobs:
           python3 -m unittest server.tests.test_bootstrap -v
 
   clean-dependencies:
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -60,7 +62,12 @@ jobs:
         env:
           WB_VERSION: ${{ inputs.release_tag }}
         run: |
-          sudo env WB_VERSION="$WB_VERSION" bash deploy/bootstrap.sh
+          # Match the documented command: only the standalone bootstrap exists
+          # beside this file; the installer must come from the verified package.
+          bootstrap=$(mktemp)
+          cp deploy/bootstrap.sh "$bootstrap"
+          sudo env WB_VERSION="$WB_VERSION" bash "$bootstrap"
+          rm -f -- "$bootstrap"
           curl -fsS http://127.0.0.1:7864/api/healthz
           curl -fsS http://127.0.0.1:7864/login/ | grep -q 'Workbuddy Pro'
           sudo systemctl is-enabled workbuddy-web
