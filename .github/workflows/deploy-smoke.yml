@@ -70,7 +70,12 @@ jobs:
           # beside this file; the installer must come from the verified package.
           bootstrap=$(mktemp)
           cp deploy/bootstrap.sh "$bootstrap"
+          # Reproduce a server with an old install.sh next to the downloaded
+          # bootstrap. It must never replace the verified release installer.
+          test ! -e "$(dirname "$bootstrap")/install.sh"
+          printf '# old unrelated installer\nexit 99\n' > "$(dirname "$bootstrap")/install.sh"
           sudo env WB_VERSION="$WB_VERSION" bash "$bootstrap"
+          rm -f -- "$(dirname "$bootstrap")/install.sh"
           rm -f -- "$bootstrap"
           curl -fsS http://127.0.0.1:7864/api/healthz
           curl -fsS http://127.0.0.1:7864/login/ | grep -q 'Workbuddy Pro'

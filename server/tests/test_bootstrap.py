@@ -88,6 +88,31 @@ class BootstrapTest(unittest.TestCase):
         self.archive(version='v0.0.1')
         self.run_bash('wb_unpack_release "$WB_TEST_ROOT/release.tar.gz" "$WB_TEST_ROOT/out" v2.6.6', ok=False)
 
+    def test_stale_neighboring_installer_cannot_replace_verified_package(self):
+        shutil.copyfile(ROOT / 'deploy/bootstrap.sh', self.directory / 'bootstrap.sh')
+        (self.directory / 'install.sh').write_text('# Old, unrelated installer\nexit 99\n')
+        self.run_bash('''
+source "$WB_TEST_ROOT/bootstrap.sh"
+APP_DIR="$WB_TEST_ROOT/app"
+TMPDIR="$WB_TEST_ROOT"
+WB_VERSION=v2.6.6
+wb_prepare_system() { :; }
+wb_fetch() { : > "$2"; }
+wb_verify_archive() { :; }
+wb_unpack_release() {
+  mkdir -p "$2/workbuddy-pro-$3/deploy"
+  cat > "$2/workbuddy-pro-$3/deploy/install.sh" <<'INSTALL'
+#!/usr/bin/env bash
+# wb_prepare_system: this is the installer from the verified release.
+printf verified-release > "$WB_TEST_ROOT/installer-used"
+INSTALL
+}
+systemctl() { :; }
+curl() { :; }
+wb_main
+''')
+        self.assertEqual((self.directory / 'installer-used').read_text(), 'verified-release')
+
     def test_existing_docker_and_compose_are_reused(self):
         self.run_bash('''
 docker() { return 0; }

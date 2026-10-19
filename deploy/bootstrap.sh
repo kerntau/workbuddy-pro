@@ -231,13 +231,10 @@ wb_main() {
   wb_verify_archive "$WB_BOOTSTRAP_TEMP/$name" "$WB_BOOTSTRAP_TEMP/$name.sha256"
   wb_unpack_release "$WB_BOOTSTRAP_TEMP/$name" "$WB_BOOTSTRAP_TEMP" "$tag"
   stage="$WB_BOOTSTRAP_TEMP/workbuddy-pro-$tag"
-  # Use this entry point's current installer; older verified releases may lack
-  # provisioning support and fixes for first installation.
-  if [[ -f ${BASH_SOURCE[0]%/*}/install.sh ]]; then
-    cp "${BASH_SOURCE[0]%/*}/install.sh" "$stage/deploy/install.sh"
-    cp "${BASH_SOURCE[0]}" "$stage/deploy/bootstrap.sh"
-  fi
-  grep -q 'wb_prepare_system' "$stage/deploy/install.sh" || wb_die '该版本不支持自动安装依赖，请选择 v2.6.6 或更新的部署包。'
+  # Run only the installer extracted from the verified release. A downloaded
+  # bootstrap can sit beside an old /tmp/install.sh or an unrelated installer;
+  # neither may overwrite files whose release checksum has already passed.
+  grep -q 'wb_prepare_system' "$stage/deploy/install.sh" || wb_die "发布包 $tag 中的安装器缺少自动安装依赖功能，请选择 v2.6.6 或更新的完整部署包。"
   if [[ $skip_upstream == 1 ]]; then
     env WB_BOOTSTRAP_PREPARED=1 APP_DIR="$APP_DIR" PY="$PY" bash "$stage/deploy/install.sh" --skip-upstream
   else
