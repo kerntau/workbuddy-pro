@@ -198,21 +198,21 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 
 # 4) 等 CI 完成后，下载**最终产物**核对
 gh release download vX.Y.Z --repo ithtelab/workbuddy-manager \
-  --pattern 'workbuddy-manager-vX.Y.Z.tar.gz' --dir /tmp/vX.Y.Z
-bash deploy/verify-release.sh /tmp/vX.Y.Z/workbuddy-manager-vX.Y.Z.tar.gz
+  --pattern 'workbuddy-pro-vX.Y.Z.tar.gz' --dir /tmp/vX.Y.Z
+bash deploy/verify-release.sh /tmp/vX.Y.Z/workbuddy-pro-vX.Y.Z.tar.gz
 #    → 打印本地 sha256，与 Releases 页面「产物校验（sha256）」里的值比一眼
-tar tzf /tmp/vX.Y.Z/workbuddy-manager-vX.Y.Z.tar.gz | head -5      # 抽查包结构
+tar tzf /tmp/vX.Y.Z/workbuddy-pro-vX.Y.Z.tar.gz | head -5      # 抽查包结构
 #    再解开看 .version 与 server/main.py 的版本号
 
 # 5) 给旧版更新器补过渡签名（v1.0.85 及更早仍强制验签；私钥只在维护者本机）
 cd /tmp/vX.Y.Z
-ssh-keygen -Y sign -f ~/.ssh/workbuddy-release -n file workbuddy-manager-vX.Y.Z.tar.gz
-gh release upload vX.Y.Z workbuddy-manager-vX.Y.Z.tar.gz.sig \
+ssh-keygen -Y sign -f ~/.ssh/workbuddy-release -n file workbuddy-pro-vX.Y.Z.tar.gz
+gh release upload vX.Y.Z workbuddy-pro-vX.Y.Z.tar.gz.sig \
   --repo ithtelab/workbuddy-manager
 #    验一下再继续（用仓库里记录的公钥，或 update.py 里内嵌的那把）：
 #    printf 'release %s\n' "$(cat ~/.ssh/workbuddy-release.pub)" > allowed_signers
 #    ssh-keygen -Y verify -f allowed_signers -I release -n file \
-#      -s workbuddy-manager-vX.Y.Z.tar.gz.sig < workbuddy-manager-vX.Y.Z.tar.gz
+#      -s workbuddy-pro-vX.Y.Z.tar.gz.sig < workbuddy-pro-vX.Y.Z.tar.gz
 
 # 6) 核对无误后**发布**（草稿对用户不可见，这一步才让版本生效）
 gh release edit vX.Y.Z --repo ithtelab/workbuddy-manager --draft=false
@@ -271,9 +271,9 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 
 ```bash
 gh release download vX.Y.Z --repo ithtelab/workbuddy-manager \
-  --pattern 'workbuddy-manager-vX.Y.Z.tar.gz' --dir /tmp/vX.Y.Z
-bash deploy/verify-release.sh /tmp/vX.Y.Z/workbuddy-manager-vX.Y.Z.tar.gz  # 与发布页哈希对一眼
-tar tzf /tmp/vX.Y.Z/workbuddy-manager-vX.Y.Z.tar.gz | head -5              # 抽查包结构
+  --pattern 'workbuddy-pro-vX.Y.Z.tar.gz' --dir /tmp/vX.Y.Z
+bash deploy/verify-release.sh /tmp/vX.Y.Z/workbuddy-pro-vX.Y.Z.tar.gz  # 与发布页哈希对一眼
+tar tzf /tmp/vX.Y.Z/workbuddy-pro-vX.Y.Z.tar.gz | head -5              # 抽查包结构
 # 解开看 .version / server/main.py 的版本号之后发布：
 gh release edit vX.Y.Z --repo ithtelab/workbuddy-manager --draft=false
 ```

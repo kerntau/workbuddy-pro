@@ -46,7 +46,7 @@ public class Win32Msg
 '@
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$setupExe = Join-Path $repoRoot 'windows\launcher\dist\WorkBuddyManagerSetup.exe'
+$setupExe = Join-Path $repoRoot 'windows\launcher\dist\WorkbuddyProSetup.exe'
 $targetDir = 'D:\ai-project\_wb_test_install'
 $timeoutSec = 180
 
@@ -63,7 +63,7 @@ $proc = Start-Process $setupExe -PassThru
 # 按进程 ID 精确定位主窗口（同名窗口可能来自其他残留实例）
 $nameWinCond = New-Object System.Windows.Automation.AndCondition(
     (New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty, '安装 WorkBuddy Manager')),
+        [System.Windows.Automation.AutomationElement]::NameProperty, '安装 Workbuddy Pro')),
     (New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Window)))
@@ -216,13 +216,13 @@ Check (Test-Path (Join-Path $targetDir '.runtime\python\python.exe')) '预置 Py
 Check (Test-Path (Join-Path $targetDir 'upstream\wb2api.exe')) '上游 wb2api.exe 存在'
 Check (Test-Path (Join-Path $targetDir 'web\out\index.html')) '前端产物存在'
 Check (Test-Path (Join-Path $targetDir 'windows\service-tools.ps1')) 'windows 脚本已就位'
-Check (Test-Path (Join-Path $targetDir 'WorkBuddyManager.exe')) '主程序已复制'
+Check (Test-Path (Join-Path $targetDir 'WorkbuddyPro.exe')) '主程序已复制'
 Check (Test-Path (Join-Path $targetDir 'Uninstall.exe')) '卸载程序已复制'
 Check (Test-Path (Join-Path $targetDir '.version')) '版本标记存在'
-Check (Test-Path 'C:\Users\Lenovo\Desktop\WorkBuddy Manager.lnk') '桌面快捷方式已创建'
-Check (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\WorkBuddy Manager\WorkBuddy Manager.lnk')) '开始菜单快捷方式已创建'
-Check (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\WorkBuddy Manager\卸载 WorkBuddy Manager.lnk')) '开始菜单卸载入口已创建'
-Check (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WorkBuddyManager') '注册表卸载项已注册'
+Check (Test-Path 'C:\Users\Lenovo\Desktop\Workbuddy Pro.lnk') '桌面快捷方式已创建'
+Check (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Workbuddy Pro\Workbuddy Pro.lnk')) '开始菜单快捷方式已创建'
+Check (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Workbuddy Pro\卸载 Workbuddy Pro.lnk')) '开始菜单卸载入口已创建'
+Check (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WorkbuddyPro') '注册表卸载项已注册'
 if ($SkipCleanup) {
     # 覆盖安装：个人数据必须保留
     Check (Test-Path (Join-Path $targetDir '.env')) '覆盖安装：.env 保留'
@@ -237,7 +237,7 @@ Start-Sleep -Milliseconds 300
 Start-Sleep -Seconds 3
 $proc.Refresh()
 Check ($proc.HasExited -or $proc.MainWindowHandle -eq 0) '点「完成」后安装窗口关闭'
-Get-Process -Name 'WorkBuddyManager' -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name 'WorkbuddyPro' -ErrorAction SilentlyContinue | Stop-Process -Force
 
 if (-not $proc.HasExited) { $proc.Kill() }
 if ($failed) { Write-Host 'RESULT: FAIL'; exit 1 }

@@ -7,9 +7,9 @@ namespace WorkBuddyLauncher
     internal static class LauncherPaths
     {
         public const string AppName = "Workbuddy Pro";
-        public const string AppExeName = "WorkBuddyManager.exe";
+        public const string AppExeName = "WorkbuddyPro.exe";
         public const string UninstallExeName = "Uninstall.exe";
-        public const string UninstallRegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WorkBuddyManager";
+        public const string UninstallRegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WorkbuddyPro";
 
         /// 内嵌 payload 的资源名（csc -resource:payload.zip,payload.zip）。
         public const string PayloadResourceName = "payload.zip";
@@ -27,7 +27,7 @@ namespace WorkBuddyLauncher
             get
             {
                 return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "WorkBuddyManager");
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "WorkbuddyPro");
             }
         }
 
@@ -42,13 +42,13 @@ namespace WorkBuddyLauncher
             return Path.Combine(root, ".env");
         }
 
-        /// 启动器偏好目录（%APPDATA%\WorkBuddyManager）。
+        /// 启动器偏好目录（%APPDATA%\WorkbuddyPro）。
         public static string AppDataDir
         {
             get
             {
                 return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WorkBuddyManager");
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WorkbuddyPro");
             }
         }
 

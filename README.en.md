@@ -38,7 +38,7 @@ The existing administrator login is still required. The initial password is save
 
 If the repository is private, sign into a GitHub account with access before downloading a release. Use the panel's offline package update when an online update is unavailable.
 
-Release archives retain the `workbuddy-manager-vX.Y.Z.tar.gz` / `.zip` names for updater compatibility. The Windows installer is named `WorkbuddyProSetup.exe`. See [development and release instructions](docs/development.md#workbuddy-pro-发布).
+Release archives are named `workbuddy-pro-vX.Y.Z.tar.gz` / `.zip`. The Windows installer is named `WorkbuddyProSetup.exe`. See [development and release instructions](docs/development.md#workbuddy-pro-发布).
 
 ---
 

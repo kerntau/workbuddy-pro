@@ -1267,7 +1267,7 @@
     "dockerNote": "This environment cannot access docker (docker is not installed on the host, or the container does not mount `/var/run/docker.sock`), so the upstream container cannot be rebuilt from the UI. Run `docker compose up -d --build` on the host. Mount the docker socket in container deployments to restore this feature (see `docker-compose.yml` in the repository).",
     "readonlyNote": "Read-only roles cannot run updates.",
     "pkgTitle": "Offline update package",
-    "pkgDesc": "For machines that cannot reach GitHub: download `workbuddy-manager-vX.Y.Z.tar.gz` from the release page, upload it here, then update from it (**no network involved**). The upload is checked to be a package of this project; if you paste the sha256 from the release page it is verified too.",
+    "pkgDesc": "For machines that cannot reach GitHub: download `workbuddy-pro-vX.Y.Z.tar.gz` from the release page, upload it here, then update from it (**no network involved**). The upload is checked to be a package of this project; if you paste the sha256 from the release page it is verified too.",
     "pkgFile": "Package file",
     "pkgShaLabel": "Release-page sha256 (optional)",
     "pkgShaPlaceholder": "Paste the digest shown in the release notes",

@@ -7,7 +7,7 @@ namespace WorkBuddyLauncher
 {
     /// 安装器 / 启动器 / 卸载器的统一入口。
     /// 同一个 exe 复制成不同名字后承担不同角色：安装包（任意位置）→ 安装模式；
-    /// 安装目录里的 WorkBuddyManager.exe → 控制模式；Uninstall.exe → 卸载模式。
+    /// 安装目录里的 WorkbuddyPro.exe → 控制模式；Uninstall.exe → 卸载模式。
     internal static class Program
     {
         [STAThread]
@@ -30,7 +30,7 @@ namespace WorkBuddyLauncher
             if (LauncherPaths.LooksInstalled(exeDir))
             {
                 bool createdNew = false;
-                using (new Mutex(true, @"Local\WorkBuddyManagerLauncher", out createdNew))
+                using (new Mutex(true, @"Local\WorkbuddyProLauncher", out createdNew))
                 {
                     if (!createdNew)
                     {

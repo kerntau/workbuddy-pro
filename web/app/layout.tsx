@@ -39,11 +39,11 @@ export const metadata: Metadata = {
   manifest: withBasePath('/favicon/site.webmanifest'),
   icons: {
     icon: [
-      {url: withBasePath('/favicon/favicon-32x32.png?v=liora'), sizes: '32x32', type: 'image/png'},
-      {url: withBasePath('/favicon/favicon-16x16.png?v=liora'), sizes: '16x16', type: 'image/png'},
+      {url: withBasePath('/favicon/favicon-32x32.png') + '?v=liora', sizes: '32x32', type: 'image/png'},
+      {url: withBasePath('/favicon/favicon-16x16.png') + '?v=liora', sizes: '16x16', type: 'image/png'},
     ],
-    shortcut: withBasePath('/favicon/favicon.ico?v=liora'),
-    apple: withBasePath('/favicon/apple-touch-icon.png?v=liora'),
+    shortcut: withBasePath('/favicon/favicon.ico') + '?v=liora',
+    apple: withBasePath('/favicon/apple-touch-icon.png') + '?v=liora',
   },
 };
 

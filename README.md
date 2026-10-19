@@ -38,7 +38,7 @@
 
 安装包从本仓库的 [Releases](https://github.com/kerntau/workbuddy-pro/releases) 获取。仓库为私有时，下载前需登录有访问权限的 GitHub 账号；无法在线更新时，可下载发布包后使用面板的离线更新。
 
-发布包沿用 `workbuddy-manager-vX.Y.Z.tar.gz` / `.zip` 命名，以兼容现有更新器；Windows 图形安装器名为 `WorkbuddyProSetup.exe`。构建和发布步骤见[开发与部署细节](docs/development.md#workbuddy-pro-发布)。
+发布包命名为 `workbuddy-pro-vX.Y.Z.tar.gz` / `.zip`；Windows 图形安装器名为 `WorkbuddyProSetup.exe`。构建和发布步骤见[开发与部署细节](docs/development.md#workbuddy-pro-发布)。
 
 ---
 

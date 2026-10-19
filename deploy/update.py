@@ -1387,7 +1387,8 @@ def fetch_release_via_redirect(latest_url: str | None = None,
         raise RuntimeError('releases/latest 未按预期重定向（网络异常或路径变更）')
 
     base = f'https://github.com/{repo}/releases/download/{tag}'
-    pkg_name = f'workbuddy-manager-{tag}.tar.gz'
+    prefix = 'workbuddy-pro' if repo == 'kerntau/workbuddy-pro' else 'workbuddy-manager'
+    pkg_name = f'{prefix}-{tag}.tar.gz'
     # 这条路径拿不到资产的 sha256（只有重定向里的 tag），下载后只校验完整性、
     # 并把本地摘要打进日志供人工比对 —— 见 verify_download。
     return {

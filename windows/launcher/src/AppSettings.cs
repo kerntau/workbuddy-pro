@@ -5,7 +5,7 @@ using System.Text;
 
 namespace WorkBuddyLauncher
 {
-    /// 启动器偏好存储：key=value 纯文本，落在 %APPDATA%\WorkBuddyManager\launcher.conf。
+    /// 启动器偏好存储：key=value 纯文本，落在 %APPDATA%\WorkbuddyPro\launcher.conf。
     internal sealed class AppSettings
     {
         private readonly string _path;

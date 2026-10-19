@@ -97,7 +97,7 @@ jobs:
         id: pack
         run: |
           TAG="${{ steps.vars.outputs.tag }}"
-          STAGE="workbuddy-manager-${TAG}"
+          STAGE="workbuddy-pro-${TAG}"
           rm -rf "$STAGE" && mkdir -p "$STAGE"
           cp -r server "$STAGE/"
           mkdir -p "$STAGE/web" && cp -r web/out "$STAGE/web/"
@@ -300,7 +300,7 @@ jobs:
           } >> RELEASE_NOTES.md
           # 摘要为空说明上面那条 sha256sum 没算出来（例如忘了给 STAGE 赋值）——
           # 发布说明里挂着一行空的哈希，用户拿去核对只会对不上，不如当场报红。
-          if ! grep -qE '^[0-9a-f]{64}  workbuddy-manager' RELEASE_NOTES.md; then
+          if ! grep -qE '^[0-9a-f]{64}  workbuddy-pro' RELEASE_NOTES.md; then
             echo "::error::发布说明里的产物 sha256 为空，检查 STAGE 变量与打包步骤"
             exit 1
           fi
@@ -337,7 +337,7 @@ jobs:
             # 的版本，不会出现「点了更新却拿到半成品」。
             gh release create "$TAG" \
               --draft \
-              --title "$TAG" \
+              --title "Workbuddy Pro $TAG" \
               --notes-file RELEASE_NOTES.md \
               "${STAGE}.tar.gz" "${STAGE}.zip"
           fi

@@ -120,13 +120,13 @@ workbuddy-manager/
 
 本分支沿用原项目的标签发布、静态前端导出、草稿 Release 和 SHA-256 校验流程。
 
-1. 确认 `server/main.py` 的版本、`CHANGELOG.md` 和计划发布的标签一致，例如 `2.6.4` / `v2.6.4`。
+1. 确认 `server/main.py` 的版本、`CHANGELOG.md` 和计划发布的标签一致，例如 `2.6.5` / `v2.6.5`。
 2. 安装后端依赖并运行 `python -m unittest discover -s server/tests -t . -v`；在 `web/` 运行 `npm ci` 和 `npm run build:export`。
-3. 提交源码，执行 `git push origin main`，再创建并推送标签：`git tag v2.6.4`、`git push origin v2.6.4`。
+3. 提交源码，执行 `git push origin main`，再创建并推送标签：`git tag v2.6.5`、`git push origin v2.6.5`。
 4. 在本仓库的 [Release 工作流](https://github.com/kerntau/workbuddy-pro/actions/workflows/release.yml) 查看构建状态。Linux 作业生成 `.tar.gz` / `.zip` 部署包，Windows 作业生成 `WorkbuddyProSetup.exe` 和 `.sha256`。
 5. 核对全部作业完成、安装器和压缩包均已上传、下载文件摘要与 Release 中记录的一致，再发布草稿。已发布版本不覆盖同名文件，修复请使用新版本标签。
 
-发布包保留 `workbuddy-manager-vX.Y.Z` 前缀，以兼容原有更新器；产品显示名称与 Windows 安装器名称使用 Workbuddy Pro。默认不构建 Docker 镜像，需要时可在手动运行工作流时勾选 `build_images`。
+发布包使用 `workbuddy-pro-vX.Y.Z` 前缀，Windows 安装器使用 `WorkbuddyProSetup.exe`，安装后启动器使用 `WorkbuddyPro.exe`。更新器兼容读取旧版部署包。默认不构建 Docker 镜像，需要时可在手动运行工作流时勾选 `build_images`。
 
 上游网关源码仍从原项目的公开 `upstream-src` 资产取得，并保留 `upstream/LICENSE`。运行期目录 `.env`、`data/`、账号授权文件和本机工具链不得进入源码提交或发布包。构建时缺少上游源码会在日志中显示告警，应先补齐再向新用户发布。
 

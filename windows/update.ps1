@@ -79,7 +79,7 @@ function Find-LocalPackage {
     foreach ($d in $searchDirectories) {
         if (-not (Test-Path $d)) { continue }
         # 只识别官方命名的 .tar.gz 归档包（大小与临时后缀做粗筛）
-        $candidates = Get-ChildItem -Path $d -Filter "workbuddy-manager-*.tar.gz" -Recurse -Depth 2 -ErrorAction SilentlyContinue | `
+        $candidates = Get-ChildItem -Path $d -Filter "workbuddy-*.tar.gz" -Recurse -Depth 2 -ErrorAction SilentlyContinue | `
             Where-Object {
                 $_.Length -gt 5000000 -and `
                 -not (Test-Path "$($_.FullName).crdownload") -and `
@@ -294,7 +294,7 @@ $existingPkg = Find-LocalPackage -searchDirectories $searchDirs -targetVersion $
 
 # 若网络未连通但找到了离线包，从离线包文件名直接推导版本号
 if (-not $latestVer -and $existingPkg) {
-    if ($existingPkg.Name -match 'workbuddy-manager-(v?\d+\.\d+\.\d+[\w\.\-]*)\.tar\.gz') {
+    if ($existingPkg.Name -match 'workbuddy-(?:pro|manager)-(v?\d+\.\d+\.\d+[\w\.\-]*)\.tar\.gz') {
         $latestVer = $Matches[1]
         Write-Host "[INFO] 已根据本地离线安装包识别版本: $latestVer" -ForegroundColor Yellow
     } else {
@@ -318,7 +318,7 @@ if (-not $latestVer -and -not $existingPkg) {
             $detected = Find-LocalPackage -searchDirectories $searchDirs -targetVersion $null
             if ($detected -and ($detected.LastWriteTime -gt $startTime.AddMinutes(-5))) {
                 $existingPkg = $detected
-                if ($detected.Name -match 'workbuddy-manager-(v?\d+\.\d+\.\d+[\w\.\-]*)\.tar\.gz') {
+                if ($detected.Name -match 'workbuddy-(?:pro|manager)-(v?\d+\.\d+\.\d+[\w\.\-]*)\.tar\.gz') {
                     $latestVer = $Matches[1]
                 } else {
                     $latestVer = "离线安装包"
@@ -377,7 +377,7 @@ if (-not $expectedDigest -and $latestVer) {
         }
         if (-not $release) { throw '所有地址都取不到 Releases API' }
         foreach ($asset in $release.assets) {
-            if ($asset.name -like 'workbuddy-manager-*.tar.gz' -and $asset.digest) {
+            if (($asset.name -like 'workbuddy-pro-*.tar.gz' -or $asset.name -like 'workbuddy-manager-*.tar.gz') -and $asset.digest) {
                 $expectedDigest = [string]$asset.digest
                 Write-Host "[INFO] 已取得发布页摘要：$expectedDigest" -ForegroundColor DarkGray
                 break
@@ -392,7 +392,7 @@ if ($targetPkg) {
     Write-Host "[INFO] 已在目录中识别到本地安装包: $($targetPkg.FullName)" -ForegroundColor Green
     Copy-Item -Path $targetPkg.FullName -Destination $tempTar -Force
 } else {
-    $tarUrl = "https://github.com/kerntau/workbuddy-pro/releases/download/$latestVer/workbuddy-manager-$latestVer.tar.gz"
+    $tarUrl = "https://github.com/kerntau/workbuddy-pro/releases/download/$latestVer/workbuddy-pro-$latestVer.tar.gz"
     $curlExe = (Get-Command curl.exe -ErrorAction SilentlyContinue).Source
     $downloadSuccess = $false
 
@@ -539,7 +539,7 @@ with tarfile.open(archive_path, "r:gz") as tf:
         parts = [p for p in name.split("/") if p not in ("", ".")]
         if not parts:
             continue
-        if parts[0].startswith("workbuddy-manager-"):
+        if parts[0].startswith(("workbuddy-pro-", "workbuddy-manager-")):
             parts = parts[1:]
         if not parts:
             continue

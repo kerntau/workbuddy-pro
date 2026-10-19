@@ -69,7 +69,7 @@ ok "Python ${PYVER}"
 # 本脚本运行时包**已经在磁盘上**了，所以它拦不住「装了一个别处来的包」——
 # 想核对就在解压前跑：bash deploy/verify-release.sh <包> <Releases 页面的 sha256>。
 # 这里只把同目录里的官方包摘要打出来，方便和 Releases 页面对一眼。
-for _pkg in $(find . -maxdepth 1 -name 'workbuddy-manager-*.tar.gz' -print 2>/dev/null); do
+for _pkg in $(find . -maxdepth 1 -name 'workbuddy-*.tar.gz' -print 2>/dev/null); do
   if command -v sha256sum >/dev/null 2>&1; then
     info "$(basename "${_pkg}")  sha256=$(sha256sum "${_pkg}" | cut -d' ' -f1)"
   fi

@@ -1240,7 +1240,7 @@
     "dockerNote": "当前环境无法操作 docker（宿主未安装 docker，或容器未挂载 `/var/run/docker.sock`），因此不能在界面重建上游容器。请在宿主机执行 `docker compose up -d --build`。容器部署时挂上 docker 套接字即可恢复此功能（见仓库 `docker-compose.yml`）。",
     "readonlyNote": "只读角色无法执行更新。",
     "pkgTitle": "离线升级包",
-    "pkgDesc": "给拿不到 GitHub 的机器用：从发布页下载 `workbuddy-manager-vX.Y.Z.tar.gz`，在这里上传，然后用它更新（**不走网络**）。上传时会校验它是不是本项目的发布包；填了发布页上的 sha256 就一并核对。",
+    "pkgDesc": "给拿不到 GitHub 的机器用：从发布页下载 `workbuddy-pro-vX.Y.Z.tar.gz`，在这里上传，然后用它更新（**不走网络**）。上传时会校验它是不是本项目的发布包；填了发布页上的 sha256 就一并核对。",
     "pkgFile": "发布包文件",
     "pkgShaLabel": "发布页 sha256（可选）",
     "pkgShaPlaceholder": "粘贴发布说明里的那串摘要",

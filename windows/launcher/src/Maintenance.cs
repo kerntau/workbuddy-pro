@@ -16,10 +16,10 @@ namespace WorkBuddyLauncher
         /// 保留数据白名单（相对安装根；覆盖安装与卸载的「保留数据」都按它跳过）。
         public static readonly string[] KeepPaths = { ".env", "data", "upstream\\auths", "upstream\\config.json" };
 
-        /// 结束正在运行的控制窗口（WorkBuddyManager.exe）。
+        /// 结束正在运行的控制窗口（WorkbuddyPro.exe）。
         public static void CloseRunningLauncher()
         {
-            foreach (Process process in Process.GetProcessesByName("WorkBuddyManager"))
+            foreach (Process process in Process.GetProcessesByName("WorkbuddyPro"))
             {
                 try
                 {

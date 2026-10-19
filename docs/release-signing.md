@@ -1,6 +1,6 @@
 # 发布包完整性：为什么不签名了
 
-**结论先说**：2026-10-14 起，发布包（`workbuddy-manager-v*.tar.gz`）**不再做离线私钥
+**结论先说**：2026-10-14 起，发布包（`workbuddy-pro-v*.tar.gz`）**不再做离线私钥
 签名**。更新器改为核对**发布页给的 sha256 与文件大小** —— 也就是绝大多数开源项目让
 用户做的那个手工校验，这里自动做了。
 
@@ -67,10 +67,10 @@ GitHub Release（HTTPS，发布说明里附了 tar.gz 的 sha256）
 
 ```bash
 # 打印本地 sha256，与 Releases 页面「产物校验（sha256）」里的值比一眼
-bash deploy/verify-release.sh workbuddy-manager-v1.0.86.tar.gz
+bash deploy/verify-release.sh workbuddy-pro-v1.0.86.tar.gz
 
 # 或者把发布页上的值直接传进去，让它判定
-bash deploy/verify-release.sh workbuddy-manager-v1.0.86.tar.gz <sha256>
+bash deploy/verify-release.sh workbuddy-pro-v1.0.86.tar.gz <sha256>
 ```
 
 Windows 一键更新脚本（`windows/update.ps1`）同样会算摘要：走 GitHub API 拿到发布页

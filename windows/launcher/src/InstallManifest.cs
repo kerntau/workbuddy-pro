@@ -20,7 +20,7 @@ namespace WorkBuddyLauncher
     internal static class InstallManifest
     {
         /// 清单文件名（放在安装根目录里，纯文本、一行一个相对路径、可人工查看）。
-        public const string FileName = "WorkBuddyManager.install.txt";
+        public const string FileName = "WorkbuddyPro.install.txt";
 
         /// 程序自己会创建/拥有的**顶层目录**（运行时产生的内容也落在这些里面）。
         public static readonly string[] OwnDirs =
@@ -32,9 +32,9 @@ namespace WorkBuddyLauncher
         /// 程序自己拥有的**顶层文件**（清单之外的兜底：日志、标记、启动器与卸载器本身）。
         public static readonly string[] OwnFiles =
         {
-            ".env", ".env.example", ".version", "WorkBuddyManager.exe", "Uninstall.exe",
+            ".env", ".env.example", ".version", "WorkbuddyPro.exe", "Uninstall.exe",
             "CHANGELOG.md", "README.md", "README.en.md", "LICENSE", "Dockerfile",
-            "docker-compose.yml", FileName, "WorkBuddyManager.exe.old", "Uninstall.exe.old",
+            "docker-compose.yml", FileName, "WorkbuddyPro.exe.old", "Uninstall.exe.old",
         };
 
         public static bool LooksLikeInstallRoot(string dir)

@@ -25,8 +25,8 @@
 **不需要联网取任何外部源码**：
 
 ```bash
-wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-manager-<版本>.tar.gz
-tar xzf workbuddy-manager-*.tar.gz && cd workbuddy-manager-*
+wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-pro-<版本>.tar.gz
+tar xzf workbuddy-pro-*.tar.gz && cd workbuddy-pro-*
 sudo bash deploy/install.sh          # 自动使用包内的 upstream/
 ```
 
@@ -71,9 +71,9 @@ cd /opt/workbuddy2api && docker compose up -d --build
 
 ```bash
 # 1) 下载 Release 包（内含已构建的前端，无需 Node.js）
-wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-manager-<版本>.tar.gz
-tar xzf workbuddy-manager-*.tar.gz
-cd workbuddy-manager-*
+wget https://github.com/kerntau/workbuddy-pro/releases/latest/download/workbuddy-pro-<版本>.tar.gz
+tar xzf workbuddy-pro-*.tar.gz
+cd workbuddy-pro-*
 
 # 2) 一键部署（自动检测上游；上游源码用 UPSTREAM_SRC 指定，见上一节）
 sudo bash deploy/install.sh
@@ -370,8 +370,8 @@ docker compose exec workbuddy-manager python /app/deploy/update.py --target both
 
 ```bash
 # 在部署目录（有 docker-compose.yml 的地方）
-tar xzf workbuddy-manager-vX.Y.Z.tar.gz
-cd workbuddy-manager-vX.Y.Z
+tar xzf workbuddy-pro-vX.Y.Z.tar.gz
+cd workbuddy-pro-vX.Y.Z
 docker compose up -d --build workbuddy-manager
 ```
 

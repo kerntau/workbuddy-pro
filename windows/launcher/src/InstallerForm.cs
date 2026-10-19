@@ -209,11 +209,11 @@ namespace WorkBuddyLauncher
             if (LauncherPaths.LooksInstalled(clean)) { return clean; }
             string leaf = Path.GetFileName(clean.TrimEnd(Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar));
-            if (string.Equals(leaf, "WorkBuddyManager", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(leaf, "WorkbuddyPro", StringComparison.OrdinalIgnoreCase))
             {
                 return clean;
             }
-            return Path.Combine(clean, "WorkBuddyManager");
+            return Path.Combine(clean, "WorkbuddyPro");
         }
 
         private bool ValidateLocation()
@@ -245,8 +245,8 @@ namespace WorkBuddyLauncher
             }
 
             // 目录语义（issue #178）：把用户选的目录当**父目录**，程序装进它的
-            // WorkBuddyManager 子目录；只有在「选中的目录本身已经是本程序的安装目录」
-            // （覆盖安装）或「它的名字就叫 WorkBuddyManager」时才直接用它。
+            // WorkbuddyPro 子目录；只有在「选中的目录本身已经是本程序的安装目录」
+            // （覆盖安装）或「它的名字就叫 WorkbuddyPro」时才直接用它。
             // 早先是照字面装进选中目录，于是有人选了自己的 D:\workspace —— 卸载时
             // 那个目录被整份删掉。现在最坏情况也只是子目录陌生，不会把用户的目录当程序根。
             target = ResolveInstallTarget(target);
