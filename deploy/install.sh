@@ -191,12 +191,12 @@ else
   # 统一改成 "127.0.0.1:7863:7863"，与更新器的端口收敛（enforce_local_bind）
   # 同一口径。改不动时不阻断安装，但会明说。
   if [ -f "${UPSTREAM_DIR}/docker-compose.yml" ]; then
-    sed -i "s#- \"${UPSTREAM_PORT}:${UPSTREAM_PORT}\"#- \"127.0.0.1:${UPSTREAM_PORT}:${UPSTREAM_PORT}\"#" "${UPSTREAM_DIR}/docker-compose.yml" 2>/dev/null || true
-    sed -i "s#- ${UPSTREAM_PORT}:${UPSTREAM_PORT}#- \"127.0.0.1:${UPSTREAM_PORT}:${UPSTREAM_PORT}\"#" "${UPSTREAM_DIR}/docker-compose.yml" 2>/dev/null || true
-    if grep -q "127.0.0.1:${UPSTREAM_PORT}:${UPSTREAM_PORT}" "${UPSTREAM_DIR}/docker-compose.yml"; then
+    sed -i "s#- \"7863:7863\"#- \"127.0.0.1:${UPSTREAM_PORT}:7863\"#" "${UPSTREAM_DIR}/docker-compose.yml" 2>/dev/null || true
+    sed -i "s#- 7863:7863#- \"127.0.0.1:${UPSTREAM_PORT}:7863\"#" "${UPSTREAM_DIR}/docker-compose.yml" 2>/dev/null || true
+    if grep -q "127.0.0.1:${UPSTREAM_PORT}:7863" "${UPSTREAM_DIR}/docker-compose.yml"; then
       ok "上游端口已收敛为 127.0.0.1:${UPSTREAM_PORT}（不对公网暴露）"
     else
-      warn "未能自动收敛上游端口，请手工把 compose 的端口映射改为 127.0.0.1:${UPSTREAM_PORT}:${UPSTREAM_PORT}"
+      die "未能自动收敛上游端口，请把 compose 的端口映射改为 127.0.0.1:${UPSTREAM_PORT}:7863 后重跑"
     fi
   fi
 
