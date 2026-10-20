@@ -154,7 +154,7 @@ export default function LoginLanding() {
           >
             <DialogHeader>
               <DialogTitle className="text-center">{t('login.submit')}</DialogTitle>
-              <DialogDescription>{t('login.subtitle')}</DialogDescription>
+              <DialogDescription className="text-center">{t('login.subtitle')}</DialogDescription>
             </DialogHeader>
             <form onSubmit={submit} className="flex min-h-0 flex-col">
               <DialogBody className="max-h-[min(400px,calc(100dvh-14rem))]">
