@@ -62,7 +62,7 @@ export function ResetPasswordDialog({
           if (r?.relogin_required) {
             notify.ok(t('settings.passwordUpdated'), t('settings.passwordRelogin'));
             window.setTimeout(() => {
-              window.location.href = `${BASE_PATH}/login`;
+              window.location.href = `${BASE_PATH}/`;
             }, 1800);
             return;
           }

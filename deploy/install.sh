@@ -354,6 +354,12 @@ else
   die "管理端未响应，请查看：journalctl -u workbuddy-web -n 50"
 fi
 
+# A current standalone bootstrap handles this after its own health check.
+# Direct installs (including those launched by an older bootstrap) handle it here.
+if [[ ${WB_BOOTSTRAP_FIREWALL_MANAGED:-0} != 1 ]]; then
+  wb_configure_firewall
+fi
+
 if curl -sf -m 5 "http://127.0.0.1:${MANAGER_PORT}/healthz" >/dev/null 2>&1; then
   ok "已连通上游（$(curl -s -m 5 http://127.0.0.1:${MANAGER_PORT}/healthz)）"
 else

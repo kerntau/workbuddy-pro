@@ -178,7 +178,9 @@ class RscNavigationHttpTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_page_itself_unchanged(self) -> None:
-        r = self.client.get('/dashboard/', headers={'accept': 'text/html'})
+        with mock.patch.object(app_main.security, 'current_user',
+                               return_value={'username': 'admin', 'role': 'admin'}):
+            r = self.client.get('/dashboard/', headers={'accept': 'text/html'})
         self.assertEqual(r.status_code, 200)
         self.assertIn('dashboard', r.text)
 

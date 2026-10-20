@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -240,7 +240,7 @@ async def cache_headers(request: Request, call_next):
         # 图标 / 字体等静态资源，内容基本不变，缓存一天
         response.headers['Cache-Control'] = 'public, max-age=86400'
     else:
-        response.headers['Cache-Control'] = 'no-cache'
+        response.headers.setdefault('Cache-Control', 'no-cache')
 
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'DENY')
@@ -353,6 +353,57 @@ def _rsc_page_for(full_path: str) -> str | None:
     return f'/{stem}' if stem else '/'
 
 
+def _frontend_response(target: Path, request: Request):
+    """Authenticate management HTML before sending it to the browser."""
+    public_pages = {'index.html', 'claim/index.html', 'claim.html',
+                    '404/index.html', '404.html'}
+    relative = target.relative_to(config.STATIC_DIR.resolve()).as_posix()
+    if relative in {'login/index.html', 'login.html'}:
+        return RedirectResponse(f'{config.BASE_PATH}/', status_code=302,
+                                headers={'Cache-Control': 'no-store'})
+    if target.suffix == '.html' and relative not in public_pages:
+        try:
+            security.current_user(request)
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            response = RedirectResponse(f'{config.BASE_PATH}/', status_code=302)
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+        return FileResponse(target, headers={'Cache-Control': 'no-store'})
+    return FileResponse(target)
+
+
+def index(request: Request):
+    return _frontend_response((config.STATIC_DIR / 'index.html').resolve(), request)
+
+
+def spa(full_path: str, request: Request):
+    # 优先命中导出的静态页面 / 资源，否则回退到 404 页面。
+    # 所有路径都必须先通过 _safe_static_path（越界即 None → 404）。
+    #
+    # 越界尝试会记一条 WARN 日志：这类请求 100% 是攻击或扫描行为，
+    # 之前不记录任何痕迹，出事后无从追溯。日志只写路径，不含内容。
+    if _looks_like_traversal(full_path):
+        logger.warning('拦截疑似路径穿越请求: %r', full_path[:300])
+    # ① 文档型请求命中 RSC 数据文件 → 送回对应页面（issue #48）。
+    # 客户端的 flight 数据请求保持原样；页面导航随后会检查会话。
+    if _is_document_request(request):
+        page = _rsc_page_for(full_path)
+        if page is not None:
+            return RedirectResponse(f'{config.BASE_PATH}{page}', status_code=302)
+    target = _safe_static_path(full_path)
+    if target is not None:
+        return _frontend_response(target, request)
+    index_candidate = _safe_static_path(f'{full_path}/index.html')
+    if index_candidate is not None:
+        return _frontend_response(index_candidate, request)
+    not_found = config.STATIC_DIR / '404.html'
+    if not_found.is_file():
+        return FileResponse(not_found, status_code=404)
+    return JSONResponse({'error': 'not found'}, status_code=404)
+
+
 if config.STATIC_DIR.is_dir():
     app.mount('/_next', StaticFiles(directory=str(config.STATIC_DIR / '_next')), name='next-assets')
     if (config.STATIC_DIR / 'favicon.ico').exists():
@@ -360,39 +411,8 @@ if config.STATIC_DIR.is_dir():
         def favicon() -> FileResponse:
             return FileResponse(config.STATIC_DIR / 'favicon.ico')
 
-    @app.get('/', include_in_schema=False)
-    def index() -> FileResponse:
-        return FileResponse(config.STATIC_DIR / 'index.html')
-
-    @app.get('/{full_path:path}', include_in_schema=False)
-    def spa(full_path: str, request: Request):
-        # 优先命中导出的静态页面 / 资源，否则回退到 404 页面。
-        # 所有路径都必须先通过 _safe_static_path（越界即 None → 404）。
-        #
-        # 越界尝试会记一条 WARN 日志：这类请求 100% 是攻击或扫描行为，
-        # 之前不记录任何痕迹，出事后无从追溯。日志只写路径，不含内容。
-        if _looks_like_traversal(full_path):
-            logger.warning('拦截疑似路径穿越请求: %r', full_path[:300])
-        # ① 文档型请求命中 RSC 数据文件 → 送回对应页面（issue #48）。
-        # 见 `_rsc_page_for` 的说明：客户端路由的兜底分支会把浏览器整页导航到
-        # `<页>/index.txt`，那边返回的是 flight 文本，用户看到满屏原始数据、
-        # 地址栏也变成了 .txt，只能手动改回地址。
-        if _is_document_request(request):
-            page = _rsc_page_for(full_path)
-            if page is not None:
-                # 补上子路径前缀：反代剥掉前缀后才到这里，但 Location 是发回浏览器
-                # 的绝对地址，不带前缀就会跳到域名根（另一个站点）上。
-                return RedirectResponse(f'{config.BASE_PATH}{page}', status_code=302)
-        target = _safe_static_path(full_path)
-        if target is not None:
-            return FileResponse(target)
-        index_candidate = _safe_static_path(f'{full_path}/index.html')
-        if index_candidate is not None:
-            return FileResponse(index_candidate)
-        not_found = config.STATIC_DIR / '404.html'
-        if not_found.is_file():
-            return FileResponse(not_found, status_code=404)
-        return JSONResponse({'error': 'not found'}, status_code=404)
+    app.add_api_route('/', index, methods=['GET'], include_in_schema=False)
+    app.add_api_route('/{full_path:path}', spa, methods=['GET'], include_in_schema=False)
 
 
 # ── 子路径部署（反向代理前缀）────────────────────────────────────────

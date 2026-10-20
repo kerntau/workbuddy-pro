@@ -81,7 +81,7 @@ export function AuthProvider({children}: {children: ReactNode}) {
     setMe(null);
     writeCachedMe(null);
     // 裸跳转不走 next/router，basePath 不会自动生效，必须显式拼上
-    if (typeof window !== 'undefined') window.location.href = `${BASE_PATH}/login`;
+    if (typeof window !== 'undefined') window.location.href = `${BASE_PATH}/`;
   }, []);
 
   useEffect(() => {

@@ -78,7 +78,7 @@ jobs:
           rm -f -- "$(dirname "$bootstrap")/install.sh"
           rm -f -- "$bootstrap"
           curl -fsS http://127.0.0.1:7864/api/healthz
-          curl -fsS http://127.0.0.1:7864/login/ | grep -q 'Workbuddy Pro'
+          curl -fsS http://127.0.0.1:7864/ | grep -q 'Workbuddy Pro'
           sudo systemctl is-enabled workbuddy-web
           sudo test -s /opt/workbuddy-pro/data/initial-admin-password.txt
           sudo docker ps --format '{{.Ports}}' | grep '127.0.0.1:7863->7863/tcp'

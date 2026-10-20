@@ -19,10 +19,12 @@ export default function MainLayout({
   const {me, loading} = useAuth();
   const router = useRouter();
 
-  // 仅在确认未登录时跳转；不阻塞内容渲染，避免每次切页闪一下
+  // 等会话确认后再显示管理界面，避免首次访问时短暂露出后台。
   useEffect(() => {
-    if (!loading && !me) router.replace('/login');
+    if (!loading && !me) router.replace('/');
   }, [loading, me, router]);
+
+  if (loading || !me) return null;
 
   return (
     <RealmProvider>

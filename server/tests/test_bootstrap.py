@@ -104,14 +104,102 @@ wb_unpack_release() {
   cat > "$2/workbuddy-pro-$3/deploy/install.sh" <<'INSTALL'
 #!/usr/bin/env bash
 # wb_prepare_system: this is the installer from the verified release.
+set -eu
+[[ $WB_BOOTSTRAP_FIREWALL_MANAGED == 1 ]]
 printf verified-release > "$WB_TEST_ROOT/installer-used"
 INSTALL
 }
 systemctl() { :; }
 curl() { :; }
+ufw() {
+  printf '%s\n' "$*" >> "$WB_TEST_ROOT/firewall-calls"
+  if [[ $1 == status ]]; then printf 'Status: active\n'; fi
+}
 wb_main
 ''')
         self.assertEqual((self.directory / 'installer-used').read_text(), 'verified-release')
+        self.assertEqual((self.directory / 'firewall-calls').read_text().splitlines(),
+                         ['status', 'allow 7864/tcp'])
+
+    def test_active_ufw_opens_only_manager_tcp_port(self):
+        for port in ('7864', '17864'):
+            with self.subTest(port=port):
+                calls = self.directory / 'firewall-calls'
+                calls.unlink(missing_ok=True)
+                self.run_bash(f'MANAGER_PORT={port}\n' + '''
+UPSTREAM_PORT=17863
+ufw() {
+  printf '%s\n' "$*" >> "$WB_TEST_ROOT/firewall-calls"
+  if [[ $1 == status ]]; then
+    [[ ${LC_ALL:-} == C ]] || return 1
+    printf 'Status: active\n\nTo Action From\n'
+  fi
+}
+wb_configure_firewall
+''')
+                self.assertEqual(calls.read_text().splitlines(), ['status', f'allow {port}/tcp'])
+
+    def test_inactive_ufw_is_not_enabled_or_modified(self):
+        self.run_bash('''
+ufw() {
+  printf '%s\n' "$*" >> "$WB_TEST_ROOT/firewall-calls"
+  printf 'Status: inactive\n'
+}
+wb_configure_firewall
+''')
+        self.assertEqual((self.directory / 'firewall-calls').read_text().splitlines(), ['status'])
+
+    def test_firewall_opt_out_does_not_call_ufw(self):
+        self.run_bash('''
+ufw() { printf modified > "$WB_TEST_ROOT/firewall-calls"; exit 91; }
+WB_CONFIGURE_FIREWALL=0
+wb_configure_firewall
+''')
+        self.assertFalse((self.directory / 'firewall-calls').exists())
+
+    def test_missing_ufw_does_not_install_or_enable_firewall(self):
+        self.run_bash('''
+command() { if [[ "$*" == '-v ufw' ]]; then return 1; else builtin command "$@"; fi; }
+ufw() { printf modified > "$WB_TEST_ROOT/firewall-calls"; exit 91; }
+apt-get() { printf installed > "$WB_TEST_ROOT/firewall-calls"; exit 92; }
+wb_configure_firewall
+''')
+        self.assertFalse((self.directory / 'firewall-calls').exists())
+
+    def test_ufw_status_failure_or_unknown_output_does_not_add_rule(self):
+        for status in ('failed', 'unknown'):
+            with self.subTest(status=status):
+                calls = self.directory / 'firewall-calls'
+                calls.unlink(missing_ok=True)
+                result = self.run_bash(f'WB_TEST_UFW_STATUS={status}\n' + '''
+ufw() {
+  printf '%s\n' "$*" >> "$WB_TEST_ROOT/firewall-calls"
+  if [[ $WB_TEST_UFW_STATUS == failed ]]; then return 1; fi
+  printf 'Unexpected status\n'
+}
+wb_configure_firewall
+''')
+                self.assertEqual(calls.read_text().splitlines(), ['status'])
+                self.assertIn('WARNING', result.stderr)
+
+    def test_ufw_rule_failure_prints_manual_command(self):
+        result = self.run_bash('''
+MANAGER_PORT=17864
+ufw() {
+  if [[ $1 == status ]]; then printf 'Status: active\n'; else return 1; fi
+}
+wb_configure_firewall
+''')
+        self.assertIn('sudo ufw allow 17864/tcp', result.stderr)
+        self.assertNotIn('立即生效', result.stdout)
+
+    def test_dependencies_only_do_not_change_firewall(self):
+        self.run_bash('''
+wb_prepare_system() { :; }
+wb_configure_firewall() { printf modified > "$WB_TEST_ROOT/firewall-calls"; exit 91; }
+wb_main --deps-only
+''')
+        self.assertFalse((self.directory / 'firewall-calls').exists())
 
     def test_existing_docker_and_compose_are_reused(self):
         self.run_bash('''

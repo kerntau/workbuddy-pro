@@ -9,7 +9,7 @@
  * 为什么不能只依赖 Next.js 的 `basePath`：它只自动改写 `next/link`、
  * `next/router`、`next/navigation` 的跳转与静态资源引用，**管不到**下面这些：
  *
- *   - `window.location.href = '/login'` 这类裸字符串赋值（浏览器原生跳转）
+ *   - `window.location.href = '/'` 这类裸字符串赋值（浏览器原生跳转）
  *   - 原生 `fetch('/api/...')`
  *   - 原生 `<a href="/dashboard">`
  *   - axios 的 `baseURL`

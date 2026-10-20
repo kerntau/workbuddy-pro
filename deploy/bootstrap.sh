@@ -4,6 +4,7 @@
 set -euo pipefail
 
 wb_log() { printf '\033[1;34m[Workbuddy Pro]\033[0m %s\n' "$*"; }
+wb_warn() { printf '\033[1;33m[WARNING]\033[0m %s\n' "$*" >&2; }
 wb_die() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 wb_default_app_dir() {
@@ -156,6 +157,38 @@ wb_prepare_system() {
   if [[ $skip_upstream != 1 ]]; then wb_prepare_docker; fi
 }
 
+wb_configure_firewall() {
+  local port=${MANAGER_PORT:-7864} status
+  if [[ ${WB_CONFIGURE_FIREWALL:-1} == 0 ]]; then
+    wb_log '按 WB_CONFIGURE_FIREWALL=0 跳过主机防火墙配置。'
+    return 0
+  fi
+  if ! command -v ufw >/dev/null 2>&1; then
+    wb_log "未检测到 UFW；若使用其他主机防火墙，请自行允许 TCP $port。"
+    return 0
+  fi
+  if ! status=$(LC_ALL=C ufw status 2>&1); then
+    wb_warn "无法读取 UFW 状态，未自动放行 TCP $port；请检查防火墙后运行：sudo ufw allow $port/tcp"
+    return 0
+  fi
+  case "$status" in
+    'Status: active'*) ;;
+    'Status: inactive'*)
+      wb_log 'UFW 未启用，跳过主机防火墙配置。'
+      return 0 ;;
+    *)
+      wb_warn "无法识别 UFW 状态，未自动放行 TCP $port；请手动检查防火墙。"
+      return 0 ;;
+  esac
+  # UFW applies rules immediately and skips existing rules on repeated installs.
+  # Open only the manager's TCP port; the upstream stays on loopback.
+  if ufw allow "$port/tcp"; then
+    wb_log "UFW 已允许管理端 TCP $port（立即生效）。"
+  else
+    wb_warn "UFW 未能放行管理端 TCP $port；请手动运行：sudo ufw allow $port/tcp"
+  fi
+}
+
 wb_verify_archive() {
   local archive=$1 checksum=$2 expected actual
   expected=$(awk 'NR==1 {print $1}' "$checksum")
@@ -207,7 +240,7 @@ wb_main() {
         printf '%s\n' 'Workbuddy Pro 一键部署（Ubuntu/Debian，x86_64/ARM64）' \
           'sudo bash bootstrap.sh             自动安装所有依赖并部署最新 Release' \
           'sudo bash bootstrap.sh --deps-only  只准备系统依赖' \
-          '可选环境变量：APP_DIR、UPSTREAM_DIR、MANAGER_PORT、WB_VERSION、PY'
+          '可选环境变量：APP_DIR、UPSTREAM_DIR、MANAGER_PORT、WB_VERSION、PY、WB_CONFIGURE_FIREWALL（0=不修改主机防火墙）'
         return ;;
       *) wb_die "未知参数：$arg" ;;
     esac
@@ -236,16 +269,18 @@ wb_main() {
   # neither may overwrite files whose release checksum has already passed.
   grep -q 'wb_prepare_system' "$stage/deploy/install.sh" || wb_die "发布包 $tag 中的安装器缺少自动安装依赖功能，请选择 v2.6.6 或更新的完整部署包。"
   if [[ $skip_upstream == 1 ]]; then
-    env WB_BOOTSTRAP_PREPARED=1 APP_DIR="$APP_DIR" PY="$PY" bash "$stage/deploy/install.sh" --skip-upstream
+    env WB_BOOTSTRAP_PREPARED=1 WB_BOOTSTRAP_FIREWALL_MANAGED=1 APP_DIR="$APP_DIR" PY="$PY" bash "$stage/deploy/install.sh" --skip-upstream
   else
-    env WB_BOOTSTRAP_PREPARED=1 APP_DIR="$APP_DIR" PY="$PY" bash "$stage/deploy/install.sh"
+    env WB_BOOTSTRAP_PREPARED=1 WB_BOOTSTRAP_FIREWALL_MANAGED=1 APP_DIR="$APP_DIR" PY="$PY" bash "$stage/deploy/install.sh"
   fi
   systemctl is-active --quiet workbuddy-web || wb_die '管理端服务未启动成功。'
   curl -fsS --retry 5 --retry-connrefused --retry-delay 2 "http://127.0.0.1:${MANAGER_PORT:-7864}/api/healthz" >/dev/null \
     || wb_die '管理端健康检查失败，请查看 journalctl -u workbuddy-web -n 80。'
+  # Handle this here even when the verified release contains an older installer.
+  wb_configure_firewall
   wb_log "已完成安装并设置开机启动。访问 http://服务器公网IP:${MANAGER_PORT:-7864}"
   wb_log "初始密码：sudo cat $APP_DIR/data/initial-admin-password.txt"
-  wb_log "云安全组请放行 TCP ${MANAGER_PORT:-7864}；上游 ${UPSTREAM_PORT:-7863} 仅监听本机。"
+  wb_log "云平台安全组仍需确认已放行 TCP ${MANAGER_PORT:-7864}；上游 ${UPSTREAM_PORT:-7863} 仅监听本机。"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then wb_main "$@"; fi

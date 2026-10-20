@@ -26,7 +26,9 @@
 sudo bash -c 'set -e; apt-get update; apt-get install -y curl ca-certificates; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL --retry 3 https://raw.githubusercontent.com/kerntau/workbuddy-pro/main/deploy/bootstrap.sh -o "$f"; bash "$f"'
 ```
 
-云平台安全组放行 TCP **7864** 后，打开 `http://服务器公网IP:7864`。用户名 `admin`，初始密码：
+脚本会在已启用的 UFW 中自动放行管理端 TCP 端口（默认 **7864**，支持自定义端口）。使用 HTTPS 反向代理、不需要直连管理端时，可设置 `WB_CONFIGURE_FIREWALL=0` 跳过。
+
+云平台安全组仍需放行 TCP **7864**，然后打开 `http://服务器公网IP:7864`。用户名 `admin`，初始密码：
 
 ```bash
 sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt

@@ -26,7 +26,9 @@ Run in the server terminal. This installs Python 3.11+, Docker and Compose, down
 sudo bash -c 'set -e; apt-get update; apt-get install -y curl ca-certificates; f=$(mktemp); trap '\''rm -f -- "$f"'\'' EXIT; curl -fsSL --retry 3 https://raw.githubusercontent.com/kerntau/workbuddy-pro/main/deploy/bootstrap.sh -o "$f"; bash "$f"'
 ```
 
-Allow TCP **7864** in your cloud security group, then open `http://your-public-IP:7864`. The username is `admin`. Read the initial password with:
+If UFW is active, the script automatically allows the manager's TCP port (**7864** by default, including custom ports). Set `WB_CONFIGURE_FIREWALL=0` to skip this when using an HTTPS reverse proxy without direct access to the manager.
+
+Your cloud security group must still allow TCP **7864**, then open `http://your-public-IP:7864`. The username is `admin`. Read the initial password with:
 
 ```bash
 sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt

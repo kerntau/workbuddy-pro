@@ -82,15 +82,19 @@ sudo bash -c 'set -e; apt-get update; apt-get install -y curl ca-certificates; f
 3. 下载最新 Release 部署包及 `.sha256`，校验通过后解压；不使用 GitHub 自动生成的 `Source code` 源码包。
 4. 使用包内上游源码构建网关，生成随机密钥，上游端口仅绑定 `127.0.0.1:7863`。
 5. 安装管理端到 `/opt/workbuddy-pro`，创建项目虚拟环境，启动并设置 systemd 开机自启。已有 `/opt/workbuddy-manager` 部署时沿用原目录。
-6. 检查服务与 HTTP 接口，成功后打印访问地址和密码位置；启动失败时停止并报错。
+6. 检查服务与 HTTP 接口，在已启用的 UFW 中放行管理端 TCP 端口，成功后打印访问地址和密码位置；启动失败时停止并报错。
 
-装完后，在云平台安全组允许 TCP `7864`，访问 `http://服务器公网IP:7864`。若主机防火墙已启用，也需要允许该端口；脚本不会修改现有防火墙规则。用户名 `admin`，默认密码位置：
+主机 UFW 已启用时，脚本自动放行管理端 TCP 端口（默认 `7864`，或 `MANAGER_PORT` 指定的端口），重复运行不会重复添加相同规则。脚本不会安装或启用 UFW，也不会放行仅供本机使用的上游端口 `7863`。其他主机防火墙需要自行配置；自动放行失败时会提示手动命令。
+
+装完后，仍需在云平台安全组允许 TCP `7864`（或自定义管理端端口），访问 `http://服务器公网IP:7864`。用户名 `admin`，默认密码位置：
 
 ```bash
 sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt
 ```
 
 重跑脚本会同步程序并重启服务，保留 `.env`、账号、密码与数据库。上游已有配置时沿用，不覆盖网关密钥。公网长期使用的 HTTPS 配置见下文。
+
+使用 HTTPS 反向代理、不需要从公网直连管理端时，运行 `sudo WB_CONFIGURE_FIREWALL=0 bash bootstrap.sh` 跳过自动放行。该选项同样适用于 `deploy/install.sh`，不会删除已经存在的放行规则。`--deps-only` 只安装依赖，不修改防火墙。
 
 也可先下载脚本，再设置安装目录、端口或固定版本：
 
@@ -143,6 +147,7 @@ sudo APP_DIR=/opt/wbm \
 | `UPSTREAM_DIR` | `/opt/workbuddy2api` | 上游目录 |
 | `UPSTREAM_REPO` | 上游 GitHub 地址 | 上游仓库地址 |
 | `MANAGER_PORT` | `7864` | 管理端端口 |
+| `WB_CONFIGURE_FIREWALL` | `1` | 在已启用的 UFW 中放行管理端 TCP 端口；设为 `0` 跳过 |
 | `UPSTREAM_PORT` | `7863` | 上游端口 |
 | `PY` | `/usr/bin/python3` | Python 解释器路径 |
 

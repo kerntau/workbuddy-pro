@@ -119,16 +119,16 @@ http.interceptors.response.use(
       // 将来再加公开页，往这个清单里加一条即可。
       // 路径必须带 basePath：basePath 只自动作用于 next/router 的跳转，裸的
       // window.location.href 会跳到域名根（通常 404）—— 登录页与公开页都一样。
-      const loginPath = `${BASE_PATH}/login`;
-      const publicPaths = [loginPath, `${BASE_PATH}/claim`];
-      // 根路径只是「跳到 /dashboard」的中转页，不在这里拦（否则首次访问者
-      // 会先被重定向到登录页并显示「会话已过期」）。
+      const entryPath = `${BASE_PATH}/`;
+      const publicPaths = [`${BASE_PATH}/login`, `${BASE_PATH}/claim`];
+      // 根路径是公开入口：匿名访客在这里点 Logo 10 次才显示登录框。
+      // 不把它放进 startsWith 清单，否则 '/' 会错误地匹配所有管理页面。
       const isRoot = path === BASE_PATH || path === `${BASE_PATH}/`;
       if (!isRoot && !publicPaths.some((p) => path.startsWith(p))) {
         // 带上 `?expired=1`：登录页据此显示「会话已过期，请重新登录」，而不是毫无
         // 解释地把人丢回登录页 —— 实测用户会以为自己点了退出、或面板坏了（明明刚才
         // 还在用）。服务端鉴权不受影响，这只是给跳转补一个原因。
-        window.location.href = `${loginPath}${hadSession ? '?expired=1' : ''}`;
+        window.location.href = `${entryPath}${hadSession ? '?expired=1' : ''}`;
       }
     }
     return Promise.reject(error);
