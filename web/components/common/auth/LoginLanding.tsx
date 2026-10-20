@@ -146,12 +146,13 @@ export default function LoginLanding() {
         <Dialog open={loginOpen} onOpenChange={handleLoginOpenChange}>
           <DialogContent
             className="max-w-[380px]"
+            showCloseButton={false}
             onCloseAutoFocus={(event) => {
               event.preventDefault();
               logoButton.current?.focus();
             }}
           >
-            <DialogHeader className="pr-10">
+            <DialogHeader>
               <DialogTitle>{t('login.submit')}</DialogTitle>
               <DialogDescription>{t('login.subtitle')}</DialogDescription>
             </DialogHeader>
