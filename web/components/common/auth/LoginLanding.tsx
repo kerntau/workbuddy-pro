@@ -50,7 +50,7 @@ export default function LoginLanding() {
 
   function handleLogoClick() {
     logoClicks.current += 1;
-    if (logoClicks.current === 10) {
+    if (logoClicks.current === 5) {
       logoClicks.current = 0;
       setLoginOpen(true);
     }
@@ -153,7 +153,7 @@ export default function LoginLanding() {
             }}
           >
             <DialogHeader>
-              <DialogTitle>{t('login.submit')}</DialogTitle>
+              <DialogTitle className="text-center">{t('login.submit')}</DialogTitle>
               <DialogDescription>{t('login.subtitle')}</DialogDescription>
             </DialogHeader>
             <form onSubmit={submit} className="flex min-h-0 flex-col">
