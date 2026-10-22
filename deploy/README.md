@@ -325,6 +325,40 @@ location /workbuddy-manager/ {
 
 ### 方式二：命令行
 
+#### git clone 部署：更新到 main 分支
+
+源码目录与运行目录可能不同。以下示例将 `/opt/workbuddy-pro-src` 的源码构建后安装到
+`/opt/workbuddy-pro`，沿用已有配置和数据，并跳过上游安装。请按实际目录调整。
+
+```bash
+sudo bash <<'SH'
+set -euo pipefail
+
+apt-get update
+apt-get install -y git nodejs npm
+
+if [ -d /opt/workbuddy-pro-src/.git ]; then
+  git -C /opt/workbuddy-pro-src switch main
+  git -C /opt/workbuddy-pro-src pull --ff-only origin main
+else
+  git clone --branch main https://github.com/kerntau/workbuddy-pro.git /opt/workbuddy-pro-src
+fi
+
+cd /opt/workbuddy-pro-src
+git log -1 --oneline
+npm --prefix web ci
+npm --prefix web run build:export
+APP_DIR=/opt/workbuddy-pro bash deploy/install.sh --skip-upstream
+systemctl is-active workbuddy-web
+curl -fsS http://127.0.0.1:7864/api/healthz
+SH
+```
+
+源码更新必须重新执行 `build:export`，只执行 `git pull` 不会更新静态页面。构建需要
+Node.js 18.18 或更高版本。网页中的一键更新读取已发布 Release，并不直接读取 main。
+
+#### 使用已发布的 Release 更新
+
 ```bash
 cd /opt/workbuddy-pro
 sudo /opt/workbuddy-pro/venv/bin/python deploy/update.py --target both

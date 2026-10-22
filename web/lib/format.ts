@@ -6,6 +6,7 @@
  * 因此本文件里不要写死任何语言：日期、数字、时长、相对时间都跟随界面语言。
  */
 import {intlLocale, t} from '@/lib/i18n';
+import {compactNumber, creditNumber} from './number-format';
 
 /** 秒级时长格式化：已过期 / 分钟 / 小时 / 天 */
 export function fmtRemain(seconds: number): string {
@@ -90,12 +91,9 @@ export function fmtNumber(n: number | null | undefined): string {
   return n.toLocaleString(intlLocale());
 }
 
-/** 大数紧凑显示：1.2k / 3.4M */
+/** 大数紧凑显示：K / M / B / T，舍入后自动进位。 */
 export function fmtCompact(n: number | null | undefined): string {
-  if (!n) return '0';
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  return compactNumber(n);
 }
 
 export function fmtLatency(ms: number): string {
@@ -258,13 +256,9 @@ export async function copyText(text: string): Promise<boolean> {
 
 /**
  * 扣费金额格式化（上游 usage.credit）。
- * 单次调用常是 0.0x 量级，直接 toLocaleString 会显示成 0，因此小数值保留
- * 最多 4 位有效小数；整数则按千分位显示。
+ * 常规值保留两位小数，小额值最多八位；更小的非零值显示为低于精度阈值，
+ * 不把真实消耗舍入成 0。
  */
 export function fmtCredit(v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-  if (v === 0) return '0';
-  if (Math.abs(v) >= 100) return Math.round(v).toLocaleString(intlLocale());
-  if (Math.abs(v) >= 1) return v.toFixed(2);
-  return v.toFixed(4);
+  return creditNumber(v, intlLocale());
 }

@@ -26,7 +26,8 @@
     "edit": "편집",
     "delete": "삭제",
     "previousPage": "이전 페이지",
-    "nextPage": "다음 페이지"
+    "nextPage": "다음 페이지",
+    "more": "더 보기"
   },
   "state": {
     "loadFailed": "데이터를 불러오지 못했습니다",
@@ -291,7 +292,20 @@
     "failedHint": "오늘 {n}건 실패 (위 요청 수에 포함되지 않음)",
     "hourlyAgg": "시간별(오늘)",
     "tokensPerSec": "출력 tok/s",
-    "throughputHint": "성공한 요청 {n}건의 생성 시간으로 추정(로그 보존 기간만)"
+    "throughputHint": "성공한 요청 {n}건의 생성 시간으로 추정(로그 보존 기간만)",
+    "rangeRequests": "기간 요청 (사용량 있음)",
+    "rangeTokens": "기간 Token",
+    "rangeCredit": "기간에 기록된 차감",
+    "rangeKeys": "기간에 사용한 키",
+    "tokenDetailHint": "입력 + 출력 · 정확한 값은 아래 내역에 표시",
+    "recordedCreditHint": "크레딧 · 업스트림이 보고한 차감만 포함",
+    "rangeFailedHint": "기간 실패 {n}회 (위 요청 수에서 제외)",
+    "rangeTopModel": "기간 최다 Token 모델: {model}",
+    "throughNow": "현재까지",
+    "axisNote": "왼쪽: Token · 오른쪽: 실패 횟수",
+    "inputTokens": "입력 {n}",
+    "outputTokens": "출력 {n}",
+    "breakdownUnavailable": "이 사용량을 가져오지 못했습니다. 다른 통계는 정상 표시됩니다"
   },
   "accounts": {
     "proxyLine": "송신 경로",
@@ -513,7 +527,8 @@
     "sharedInstanceTitle": "이 그룹은 기본 그룹과 같은 업스트림 인스턴스를 공유합니다",
     "sharedInstanceHint": "이 그룹의 계정 파일은 패널이 따로 관리하지만, 업스트림은 기본 그룹의 디렉터리만 읽습니다. 그래서 여기에 넣은 계정(이 그룹에서 QR로 새로 추가한 계정 포함)은 계속 “미로드”로 표시되고, 포워딩과 체크인에도 사용되지 않습니다. 풀을 실제로 분리하려면 서버에 workbuddy2api를 하나 더 배포하고 이 그룹의 업스트림 주소를 그 인스턴스로 바꾸세요.",
     "sharedInstanceAction": "설정 → 업스트림에서 주소 변경",
-    "refreshFailed": "계정 목록 새로 고침에 실패했습니다. 표시된 내용이 오래되었을 수 있습니다. 다시 시도하세요."
+    "refreshFailed": "계정 목록 새로 고침에 실패했습니다. 표시된 내용이 오래되었을 수 있습니다. 다시 시도하세요.",
+    "copyUid": "전체 UID 복사"
   },
   "keys": {
     "title": "API 키",
@@ -1557,7 +1572,10 @@
     "proxyBindingsManagerTitle": "연결 관리",
     "proxyBindingsManagerDesc": "계정마다 최대 한 개의 경로를 씁니다. 기본(풀 정책 따름)을 고르면 풀이 선택합니다.",
     "proxyAutoAssignDesc": "아직 연결되지 않은 계정을 이 경로에 한꺼번에 할당합니다(선택 순서가 안정적이라 매번 같은 묶음이 뽑힙니다).",
-    "proxyGlobalSourceOff": "전역 프록시가 꺼져 있습니다(대체 없음)"
+    "proxyGlobalSourceOff": "전역 프록시가 꺼져 있습니다(대체 없음)",
+    "modelsShown": "전체 {total}개 중 {shown}개 모델 표시",
+    "expandModels": "전체 {n}개 표시",
+    "collapseModels": "모델 접기"
   },
   "phrases": {
     "账号最短间隔": "계정 최소 간격",

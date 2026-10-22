@@ -26,7 +26,8 @@
     "edit": "Edit",
     "delete": "Delete",
     "previousPage": "Previous page",
-    "nextPage": "Next page"
+    "nextPage": "Next page",
+    "more": "More"
   },
   "state": {
     "loadFailed": "Failed to load data",
@@ -318,7 +319,20 @@
     "failedHint": "{n} failed today (not counted in the requests above)",
     "hourlyAgg": "Hourly (today)",
     "tokensPerSec": "Output tok/s",
-    "throughputHint": "Estimated from {n} successful requests (request-log retention window only)"
+    "throughputHint": "Estimated from {n} successful requests (request-log retention window only)",
+    "rangeRequests": "Period requests (with usage)",
+    "rangeTokens": "Period tokens",
+    "rangeCredit": "Recorded period charges",
+    "rangeKeys": "Keys used in period",
+    "tokenDetailHint": "Input + output · Exact values below",
+    "recordedCreditHint": "Credits · Charges reported by upstream only",
+    "rangeFailedHint": "{n} failed in period (excluded from requests above)",
+    "rangeTopModel": "Most tokens in period: {model}",
+    "throughNow": "Through now",
+    "axisNote": "Left: tokens · Right: failed requests",
+    "inputTokens": "Input {n}",
+    "outputTokens": "Output {n}",
+    "breakdownUnavailable": "This usage data is unavailable; other statistics are still shown"
   },
   "accounts": {
     "proxyLine": "Exit route",
@@ -540,7 +554,8 @@
     "sharedInstanceTitle": "This group shares the same upstream instance as the default group",
     "sharedInstanceHint": "This group’s account files are managed by the panel on their own, but the upstream only reads the default group’s directory — so any account placed here (including ones you add by QR in this group) will keep showing “not loaded”, and will not be used for forwarding or check-in. To truly separate the pools, deploy a second workbuddy2api instance on your server and point this group’s upstream URL at it.",
     "sharedInstanceAction": "Change the URL in Settings → Upstreams",
-    "refreshFailed": "Refreshing the account list failed — what you see may be stale. Try again."
+    "refreshFailed": "Refreshing the account list failed — what you see may be stale. Try again.",
+    "copyUid": "Copy full UID"
   },
   "keys": {
     "title": "API keys",
@@ -1584,7 +1599,10 @@
     "proxyBindingsManagerTitle": "Account bindings",
     "proxyBindingsManagerDesc": "Each account uses at most one route; pick “Default (follow pool)” to let the pool choose.",
     "proxyAutoAssignDesc": "Assign a batch of not-yet-bound accounts to this route (the picking order is stable, so the same batch is chosen every time).",
-    "proxyGlobalSourceOff": "Global upstream proxy is off (no fallback proxy)"
+    "proxyGlobalSourceOff": "Global upstream proxy is off (no fallback proxy)",
+    "modelsShown": "Showing {shown} of {total} models",
+    "expandModels": "Show all {n}",
+    "collapseModels": "Collapse models"
   },
   "phrases": {
     "账号最短间隔": "Minimum account gap",

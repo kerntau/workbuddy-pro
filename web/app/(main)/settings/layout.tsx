@@ -885,6 +885,7 @@ for (const g of GROUPS) for (const f of g.fields) FIELD_BY_KEY[f.key] = f;
  * 而用户能看到的行为（可分享、可收藏、可后退、切 Tab 不重取数据）完全一样。
  */
 export default function SettingsLayout({children}: {children: React.ReactNode}) {
+  const [allModels, setAllModels] = useState(false);
   const {t, tp} = useI18n();
   const {isAdmin} = useAuth();
   /**
@@ -1317,7 +1318,7 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
           )}
 
           {/* 账号池概况 */}
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
             <div className="rounded-[20px] bg-muted px-3.5 py-3">
               <div className="mb-2 text-sm font-medium">{t('settings.serviceInfo')}</div>
               <div className="space-y-1.5 text-xs">
@@ -1331,20 +1332,18 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
                      : '—'],
                   ['apiKey', t('settings.infoApiKey'), cfg?.api_key_masked ? t('settings.infoApiKeySet') : '—'],
                   ['authDir', t('settings.infoAuthDir'), cfg?.auth_dir || '—'],
-                ] as [string, string, string][]).map(([id, k, v]) => (
-                  <div key={id} className="flex items-center justify-between gap-3">
+                ] as [string, string, string][]).map(([id, k, v]) => (<div key={id} className="flex items-center justify-between gap-3">
                     <span className="shrink-0 text-muted-foreground">{k}</span>
-                    <span className="min-w-0 flex-1 truncate text-right font-mono" title={v}>{v}</span>
+                    <span className="min-w-0 flex-1 break-all whitespace-normal text-right font-mono" title={v}>{v}</span>
                     {id === 'authDir' && v !== '—' && (
                       <CopyButton value={v} title={t('settings.copyAuthDir')} className="h-6 w-6" />
                     )}
-                  </div>
-                ))}
+                  </div>))}
                 {cfg?.upstream_auth_dir && (
                   <div className="flex items-start justify-between gap-3">
                     <span className="shrink-0 text-muted-foreground">{t('settings.upstreamDeclaredDir')}</span>
                     <span
-                      className="min-w-0 flex-1 truncate text-right font-mono text-amber-600 dark:text-amber-400"
+                      className="min-w-0 flex-1 break-all whitespace-normal text-right font-mono text-amber-600 dark:text-amber-400"
                       title={cfg.upstream_auth_dir}
                     >
                       {cfg.upstream_auth_dir}
@@ -1404,19 +1403,23 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
                 </Button>
               </div>
               <div className="flex flex-wrap gap-1">
-                {models.length ? (
-                  models.map((m) => (
+                {models.length ? ((allModels ? models : models.slice(0, 24)).map((m) => (
                     <Badge key={m.id} variant="secondary" className="rounded-full font-mono text-[10px]">
                       {m.id}
                     </Badge>
-                  ))
-                ) : (
+                  ))) : (
                   <span className="text-xs text-muted-foreground">
                     {upstreamReady ? t('settings.modelsNotFetched') : t('settings.cfgNotReady')}
                   </span>
                 )}
               </div>
 
+              {models.length > 24 && (
+                <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span>{t('settings.modelsShown', {shown: allModels ? models.length : 24, total: models.length})}</span>
+                  <Button variant="ghost" size="sm" className="h-7 rounded-full text-[11px]" onClick={() => setAllModels(!allModels)}>{allModels ? t('settings.collapseModels') : t('settings.expandModels', {n: models.length})}</Button>
+                </div>
+              )}
               {/* 关键说明：模型列表由上游**随机挑一个健康账号**去拉，取决于该账号的
                   授权，所以「同样的部署、不同账号看到的模型数量不同」是正常的——
                   并非本站少显示。上游自身还会缓存 1 小时。 */}

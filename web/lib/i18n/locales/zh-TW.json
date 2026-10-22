@@ -26,7 +26,8 @@
     "edit": "編輯",
     "delete": "刪除",
     "previousPage": "上一頁",
-    "nextPage": "下一頁"
+    "nextPage": "下一頁",
+    "more": "更多"
   },
   "state": {
     "loadFailed": "資料載入失敗",
@@ -291,7 +292,20 @@
     "failedHint": "今日失敗 {n} 次（不計入上方請求數）",
     "hourlyAgg": "按小時（當日彙總）",
     "tokensPerSec": "輸出 tok/s",
-    "throughputHint": "依 {n} 筆成功請求的生成耗時估算（僅涵蓋日誌保留期間）"
+    "throughputHint": "依 {n} 筆成功請求的生成耗時估算（僅涵蓋日誌保留期間）",
+    "rangeRequests": "區間請求（有用量）",
+    "rangeTokens": "區間 Token",
+    "rangeCredit": "區間已記錄扣費",
+    "rangeKeys": "期間呼叫金鑰",
+    "tokenDetailHint": "輸入 + 輸出 · 完整值見下方明細",
+    "recordedCreditHint": "積分 · 僅計上游回傳的扣費",
+    "rangeFailedHint": "區間失敗 {n} 次（不計入上方請求數）",
+    "rangeTopModel": "區間 Token 最多：{model}",
+    "throughNow": "截至目前",
+    "axisNote": "左軸：Token · 右軸：失敗次數",
+    "inputTokens": "輸入 {n}",
+    "outputTokens": "輸出 {n}",
+    "breakdownUnavailable": "此部分用量暫未取得，其他統計正常顯示"
   },
   "accounts": {
     "proxyLine": "出口線路",
@@ -513,7 +527,8 @@
     "sharedInstanceTitle": "這一組和預設分組共用同一套上游實例",
     "sharedInstanceHint": "這一組的帳號檔案由面板單獨管理，而上游只讀預設分組的帳號目錄——所以放進這一組的帳號（包括在這裡新掃碼加的）都會一直顯示「未載入」，轉發與簽到也不會用到它們。要真正把帳號池分開，請在伺服器上再部署一套 workbuddy2api，再把這一組的「上游位址」改成那套實例。",
     "sharedInstanceAction": "去「設定 → 上游」改位址",
-    "refreshFailed": "帳號列表這次重新整理沒成功 —— 下面可能是舊資料，點重試再取一次。"
+    "refreshFailed": "帳號列表這次重新整理沒成功 —— 下面可能是舊資料，點重試再取一次。",
+    "copyUid": "複製完整 UID"
   },
   "keys": {
     "title": "API 金鑰",
@@ -1557,7 +1572,10 @@
     "proxyBindingsManagerTitle": "綁定管理",
     "proxyBindingsManagerDesc": "每個帳號最多綁一條線路；選「預設（跟隨池策略）」就由池按策略分配。",
     "proxyAutoAssignDesc": "把一批還沒綁線路的帳號自動安排到這條線路上（挑人規則穩定，不會每次挑到不同的一批）。",
-    "proxyGlobalSourceOff": "全域上游代理已關閉（不走兜底代理）"
+    "proxyGlobalSourceOff": "全域上游代理已關閉（不走兜底代理）",
+    "modelsShown": "已顯示 {shown} / 共 {total} 個模型",
+    "expandModels": "展開全部 {n} 個",
+    "collapseModels": "收起模型"
   },
   "phrases": {
     "账号最短间隔": "帳號最短間隔",

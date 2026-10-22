@@ -1,6 +1,6 @@
 'use client';
 
-import {useCallback, useState} from 'react';
+import {useCallback, useMemo, useState} from 'react';
 import {Activity, TrendingUp, KeyRound, Cpu, Wrench, RotateCcw, Coins, AlertTriangle, Server} from 'lucide-react';
 import {
   Area,
@@ -31,6 +31,7 @@ import {
   todayKeyLocal,
   type ChartPoint,
 } from '@/lib/usage-chart';
+import {summarizeUsage} from '@/lib/usage-display';
 import {fmtCompact, fmtNumber, fmtCredit} from '@/lib/format';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {StatCard} from '@/components/common/layout/StatCard';
@@ -180,6 +181,8 @@ export default function StatsPage() {
   );
 
   const summary: StatsSummary | null = values.summary ?? null;
+  const rangeUsage = useMemo(() => summarizeUsage(values.daily), [values.daily]);
+  const topModel = values.byModel?.[0]?.name;
   const daily: UsagePoint[] = values.daily ?? EMPTY_POINTS;
   const byModel: UsageBreakdown[] = values.byModel ?? EMPTY_BREAKDOWN;
   const byKey: UsageBreakdown[] = values.byKey ?? EMPTY_BREAKDOWN;
@@ -207,9 +210,11 @@ export default function StatsPage() {
     ? hourlySeries(hourly, new Date().getHours())
     : dailySeries(daily, d, todayKeyLocal());
 
-  /** 今日失败总数（4xx + 5xx）。单独来自请求日志——用量汇总只含成功请求。 */
-  const todayFailed =
-    (summary?.failures?.today_4xx ?? 0) + (summary?.failures?.today_5xx ?? 0);
+  const rangeFailed = rangeUsage?.failed ?? 0;
+  const chartUnavailable = spec.granularity === 'hour'
+    ? !values.hourly && 'hourly' in errors
+    : !values.daily && 'daily' in errors;
+  const dateFrom = dailySeries([], d, todayKeyLocal())[0].full;
 
   /**
    * 页头抽成变量，是为了让下面「首屏骨架 / 错误态」那一段也带上它——
@@ -351,48 +356,37 @@ export default function StatsPage() {
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
         <StatCard
-          label={t('stats.todayRequests')}
-          value={fmtNumber(summary?.today_requests)}
-          hint={
-            // 有失败时把失败数说在前面：这个卡片是用户查「今天出了什么事」的
-            // 第一站，而「用量 N token」是次要信息。
-            //
-            // 也要说清**失败不计入上面的数字**：请求数来自用量汇总（只含成功
-            // 请求），所以「今天 0 次请求 + 31 次失败」是可能的——那正是全池
-            // 中断的形态。不说清的话用户会以为卡片坏了。
-            todayFailed > 0
-              ? t('stats.failedHint', {n: fmtNumber(todayFailed)})
-              : t('stats.tokenHint', {v: fmtCompact(summary?.today_tokens)})
-          }
+          label={t('stats.rangeRequests')}
+          value={rangeUsage ? fmtNumber(rangeUsage.requests) : '—'}
+          hint={rangeUsage
+            ? rangeFailed > 0
+              ? t('stats.rangeFailedHint', {n: fmtNumber(rangeFailed)})
+              : t('stats.tokenHint', {v: fmtCompact(rangeUsage.tokens)})
+            : t('state.partialFailed')}
           icon={Activity}
-          tone={todayFailed > 0 ? 'warning' : 'info'}
-          hintTone={todayFailed > 0 ? 'warning' : undefined}
-          delay={0}
+          tone={rangeFailed > 0 ? 'warning' : 'info'}
+          hintTone={rangeFailed > 0 ? 'warning' : undefined}
         />
         <StatCard
-          label={t('stats.weekRequests')}
-          value={fmtNumber(summary?.week_requests)}
-          hint={t('stats.tokenHint', {v: fmtCompact(summary?.week_tokens)})}
+          label={t('stats.rangeTokens')}
+          value={<span title={rangeUsage ? `${fmtNumber(rangeUsage.tokens)} Token` : undefined}>{fmtCompact(rangeUsage?.tokens)}</span>}
+          hint={t('stats.tokenDetailHint')}
           icon={TrendingUp}
           tone="accent"
           delay={0.05}
         />
         <StatCard
-          label={t('stats.todayPaid')}
-          value={fmtCredit(summary?.today_credit)}
-          hint={
-            summary?.today_credit
-              ? t('stats.todayPaidHint', {v: fmtCredit(summary?.week_credit)})
-              : t('stats.noCreditFromUpstream')
-          }
+          label={t('stats.rangeCredit')}
+          value={fmtCredit(rangeUsage?.credit)}
+          hint={t('stats.recordedCreditHint')}
           icon={Coins}
           tone="warning"
           delay={0.1}
         />
         <StatCard
-          label={t('stats.activeKeys')}
-          value={fmtNumber(summary?.active_keys)}
-          hint={summary?.top_model ? t('stats.topModel', {model: summary.top_model}) : t('stats.distributing')}
+          label={t('stats.rangeKeys')}
+          value={values.byKey ? fmtNumber(byKey.length) : '—'}
+          hint={topModel ? t('stats.rangeTopModel', {model: topModel}) : undefined}
           icon={KeyRound}
           tone="success"
           delay={0.15}
@@ -408,12 +402,15 @@ export default function StatsPage() {
             {spec.granularity === 'hour' ? t('stats.hourlyAgg') : t('stats.dailyAgg')}
           </div>
         </div>
+        <div className="mb-2 flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
+          <span>{dateFrom} — {todayKeyLocal()}{d === 1 ? ` · ${t('stats.throughNow')}` : ''}</span>
+          <span>{t('stats.axisNote')}</span>
+        </div>
         <div className="h-[260px] w-full">
-          {chartData.length ? (
-            <ResponsiveContainer width="100%" height="100%">
+          {chartUnavailable ? <LoadError message={t('stats.breakdownUnavailable')} onRetry={retry} /> : chartData.length ? (<ResponsiveContainer width="100%" height="100%">
               {/* 用 ComposedChart 而不是 BarChart：BarChart 会忽略非 Bar 子组件，
                   失败曲线（Line）根本不会被渲染 —— 实测踩过，图上一条线都没有。 */}
-              <ComposedChart data={chartData} margin={{top: 4, right: 8, bottom: 0, left: -8}} barCategoryGap="20%">
+              <ComposedChart data={spec.granularity === "hour" ? chartData.map((p,i) => i > new Date().getHours() ? {...p,tokens:null,failed:null} : p) : chartData} margin={{top: 4, right: 8, bottom: 0, left: -8}} barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis
                   dataKey="label"
@@ -425,7 +422,9 @@ export default function StatsPage() {
                   interval={Math.max(0, spec.tickEvery - 1)}
                 />
                 <YAxis tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted-foreground)" tickFormatter={(v) => fmtCompact(Number(v))} />
+                <YAxis yAxisId="failed" orientation="right" allowDecimals={false} width={38} tickLine={false} axisLine={false} fontSize={11} stroke="var(--destructive)" />
                 <Tooltip
+                  labelFormatter={(label: unknown, payload: readonly {payload?: {full?: string}}[]) => payload?.[0]?.payload?.full || String(label)}
                   cursor={{fill: 'var(--accent)'}}
                   contentStyle={{
                     background: 'var(--popover)',
@@ -473,12 +472,11 @@ export default function StatsPage() {
                     strokeWidth={2}
                   />
                 )}
-                {/* 失败数用一条线叠在同一张图上：它与 token 柱不同量级，做成柱子
-                    会把柱形压扁。线只作「那天出过事」的信号，具体数值看悬停。
-                    没有失败时贴着 0，不干扰读数。 */}
+                {/* 失败次数独立使用右轴，避免被 Token 的数量级压平。 */}
                 <Line
                   type="monotone"
                   dataKey="failed"
+                  yAxisId="failed"
                   name="failed"
                   stroke="var(--destructive)"
                   strokeWidth={1.5}
@@ -486,16 +484,15 @@ export default function StatsPage() {
                   dot={false}
                 />
               </ComposedChart>
-            </ResponsiveContainer>
-          ) : (
+            </ResponsiveContainer>) : (
             <div className="grid h-full place-items-center text-xs text-muted-foreground">{t('stats.noUsageData')}</div>
           )}
         </div>
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <BreakdownPanel title={t('stats.byModel')} icon={Cpu} items={byModel} throughput />
-        <BreakdownPanel title={t('stats.byKey')} icon={KeyRound} items={byKey} />
+        <BreakdownPanel title={t('stats.byModel')} icon={Cpu} items={byModel} throughput failed={!values.byModel && 'byModel' in errors} onRetry={retry} />
+        <BreakdownPanel title={t('stats.byKey')} icon={KeyRound} items={byKey} failed={!values.byKey && 'byKey' in errors} onRetry={retry} />
       </section>
 
       {/* 上游自己那份统计（issue #59）。**单独一段、口径写明**：它含直连上游的
@@ -515,9 +512,8 @@ export default function StatsPage() {
             {upstream.error ? `：${upstream.error}` : ''}
             {upstream.message ? `（${upstream.message}）` : ''}
           </p>
-        ) : upstream?.total ? (
-          <>
-            <div className="mb-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+        ) : upstream?.total ? (<>
+            <div className="mb-4 grid grid-cols-2 gap-4 border-b border-border/40 pb-4 text-xs sm:grid-cols-3 xl:grid-cols-6">
               <UpstreamMetric label={t('metric.requests')} value={fmtNumber(upstream.total.requests)} />
               <UpstreamMetric label={t('stats.upstreamSuccess')} value={fmtNumber(upstream.total.success)} />
               <UpstreamMetric
@@ -558,8 +554,7 @@ export default function StatsPage() {
                 </TableBody>
               </Table>
             )}
-          </>
-        ) : null}
+          </>) : null}
       </section>
     </div>
   );
@@ -568,9 +563,9 @@ export default function StatsPage() {
 /** 上游统计里的一个数字（标签 + 值）。失败数用琥珀色标出来。 */
 function UpstreamMetric({label, value, tone}: {label: string; value: string; tone?: 'warning'}) {
   return (
-    <div className="flex items-baseline gap-1.5">
+    <div className="flex min-w-0 flex-col gap-2">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium tabular-nums ${tone === 'warning' ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+      <span className={`text-lg font-semibold tabular-nums ${tone === 'warning' ? 'text-amber-600 dark:text-amber-400' : ''}`}>
         {value}
       </span>
     </div>
@@ -588,12 +583,16 @@ function BreakdownPanel({
   icon: Icon,
   items,
   throughput = false,
+  failed = false,
+  onRetry,
 }: {
   title: string;
   icon: typeof Cpu;
   items: UsageBreakdown[];
   /** 显示「输出 tok/s」列（只有按模型表需要，按密钥没有这项） */
   throughput?: boolean;
+  failed?: boolean;
+  onRetry?: () => void;
 }) {
   const t = useT();
   const max = Math.max(1, ...items.map((i) => i.prompt_tokens + i.completion_tokens));
@@ -603,8 +602,7 @@ function BreakdownPanel({
         <Icon className="h-4 w-4" />
         {title}
       </div>
-      {items.length ? (
-        <Table>
+      {failed ? <LoadError message={t('stats.breakdownUnavailable')} onRetry={onRetry} /> : items.length ? (<Table>
           <TableHeader>
             <TableRow className="border-b border-border/60 hover:bg-transparent">
               <TableHead className="pl-0 text-[11px] text-muted-foreground">{t('metric.name')}</TableHead>
@@ -626,7 +624,7 @@ function BreakdownPanel({
                   <TableCell className="pl-0">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full" style={{background: CHART_COLORS[i % CHART_COLORS.length]}} />
-                      <span className="max-w-[140px] truncate text-xs font-medium">{it.name || t('metric.unknown')}</span>
+                      <span className="break-all whitespace-normal text-xs font-medium" title={it.name}>{it.name || t('metric.unknown')}</span>
                     </div>
                     <div className="mt-1.5 h-1 w-full max-w-[140px] overflow-hidden rounded-full bg-border">
                       <div
@@ -639,7 +637,13 @@ function BreakdownPanel({
                     </div>
                   </TableCell>
                   <TableCell className="text-xs tabular-nums">{fmtNumber(it.requests)}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{fmtCompact(tokens)}</TableCell>
+                  <TableCell className="text-xs tabular-nums">
+                    <span title={`${fmtNumber(tokens)} Token`}>{fmtCompact(tokens)}</span>
+                    <div className="mt-1 space-y-0.5 whitespace-nowrap text-[10px] leading-4 text-muted-foreground">
+                      <div>{t('stats.inputTokens', {n: fmtNumber(it.prompt_tokens)})}</div>
+                      <div>{t('stats.outputTokens', {n: fmtNumber(it.completion_tokens)})}</div>
+                    </div>
+                  </TableCell>
                   {throughput && (
                     <TableCell className="whitespace-nowrap text-xs tabular-nums">
                       {typeof it.tokens_per_sec === 'number' ? (
@@ -658,8 +662,7 @@ function BreakdownPanel({
               );
             })}
           </TableBody>
-        </Table>
-      ) : (
+        </Table>) : (
         <EmptyState
           icon={Activity}
           title={t('stats.emptyTitle')}

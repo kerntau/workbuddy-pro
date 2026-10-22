@@ -26,7 +26,8 @@
     "edit": "編集",
     "delete": "削除",
     "previousPage": "前のページ",
-    "nextPage": "次のページ"
+    "nextPage": "次のページ",
+    "more": "その他"
   },
   "state": {
     "loadFailed": "データの読み込みに失敗しました",
@@ -291,7 +292,20 @@
     "failedHint": "本日 {n} 件失敗（上のリクエスト数には含まれません）",
     "hourlyAgg": "時間別（本日分）",
     "tokensPerSec": "出力 tok/s",
-    "throughputHint": "{n} 件の成功リクエストの生成時間から推定（ログ保持期間内のみ）"
+    "throughputHint": "{n} 件の成功リクエストの生成時間から推定（ログ保持期間内のみ）",
+    "rangeRequests": "期間内リクエスト（使用量あり）",
+    "rangeTokens": "期間内 Token",
+    "rangeCredit": "期間内の記録済み課金",
+    "rangeKeys": "期間内に使用したキー",
+    "tokenDetailHint": "入力 + 出力 · 正確な値は下の明細に表示",
+    "recordedCreditHint": "クレジット · 上流が返した課金のみ",
+    "rangeFailedHint": "期間内の失敗 {n} 件（上記件数に含まれません）",
+    "rangeTopModel": "期間内 Token 最多：{model}",
+    "throughNow": "現在まで",
+    "axisNote": "左軸：Token · 右軸：失敗件数",
+    "inputTokens": "入力 {n}",
+    "outputTokens": "出力 {n}",
+    "breakdownUnavailable": "この使用量は取得できません。他の統計は表示しています"
   },
   "accounts": {
     "proxyLine": "送信経路",
@@ -513,7 +527,8 @@
     "sharedInstanceTitle": "このグループはデフォルトグループと同じ上流インスタンスを共有しています",
     "sharedInstanceHint": "このグループのアカウントファイルはパネルが独自に管理していますが、上流が読み込むのはデフォルトグループのディレクトリだけです。そのため、ここに置いたアカウント（このグループで QR から追加したものも含む）は「未読み込み」のまま表示され、転送やチェックインにも使われません。プールを本当に分けるには、サーバーにもう 1 つ workbuddy2api を配備し、このグループの「上流 URL」をそのインスタンスに変更してください。",
     "sharedInstanceAction": "「設定 → 上流」で URL を変更",
-    "refreshFailed": "アカウント一覧の更新に失敗しました。表示は古い可能性があります。再試行してください。"
+    "refreshFailed": "アカウント一覧の更新に失敗しました。表示は古い可能性があります。再試行してください。",
+    "copyUid": "UID 全体をコピー"
   },
   "keys": {
     "title": "API キー",
@@ -1557,7 +1572,10 @@
     "proxyBindingsManagerTitle": "割当管理",
     "proxyBindingsManagerDesc": "アカウントごとに最大 1 本。既定（プール戦略に従う）を選ぶとプールが選びます。",
     "proxyAutoAssignDesc": "未割当のアカウントをこの経路にまとめて割り当てます（選び方は安定していて、毎回同じ順で選ばれます）。",
-    "proxyGlobalSourceOff": "全体プロキシはオフ（フォールバックなし）"
+    "proxyGlobalSourceOff": "全体プロキシはオフ（フォールバックなし）",
+    "modelsShown": "{total} モデル中 {shown} 件を表示",
+    "expandModels": "全 {n} 件を表示",
+    "collapseModels": "モデルを折りたたむ"
   },
   "phrases": {
     "账号最短间隔": "アカウントの最短間隔",

@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import {AccountUid} from '@/components/common/accounts/AccountUid';
+import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   Gift,
@@ -798,7 +800,7 @@ export default function AccountsPage() {
           ? 'text-amber-600 dark:text-amber-400'
           : 'text-foreground';
     return (
-      <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
         <span className={`text-xs font-medium tabular-nums ${tone}`} title={t('accounts.creditsTitle')}>
           {fmtNumber(value)}
         </span>
@@ -827,7 +829,7 @@ export default function AccountsPage() {
             </span>
           ))
         )}
-        <CreditCountdown expiries={fromSnapshot ? undefined : meta?.expiries} />
+        <span className="basis-full"><CreditCountdown expiries={fromSnapshot ? undefined : meta?.expiries} /></span>
       </span>
     );
   }
@@ -895,7 +897,7 @@ export default function AccountsPage() {
     // 补一行签发时间（≈ 最近一次刷新）才能区分——后者是保活没覆盖到的隐患账号。
     const issued = a.issued_at ?? null;
     return (
-      <div className="w-[150px]">
+      <div className="w-full max-w-[150px]">
         <div className={`mb-1 text-[11px] font-medium tabular-nums ${vis.textClass}`}>
           {fmtRemain(a.remain_seconds)}
         </div>
@@ -1131,6 +1133,22 @@ export default function AccountsPage() {
           }
         />
       </div>
+    );
+  }
+
+  function renderMoreActions(a: Account) {
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-7 rounded-md px-2 text-xs">
+            {t('common.more')}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-auto max-w-[min(320px,calc(100vw-2rem))] p-3">
+          <div className="mb-2 break-all text-xs font-medium">{a.nickname}</div>
+          {renderActions(a)}
+        </PopoverContent>
+      </Popover>
     );
   }
 
@@ -1414,25 +1432,23 @@ export default function AccountsPage() {
         </section>
       )}
 
-      {accounts && (
-      <section className="overflow-hidden rounded-[20px] bg-muted">
+      {accounts && (<section className="overflow-hidden rounded-[20px] bg-muted">
         {/* 手机端：卡片列表。表格 6 列在窄屏需要横向滚动，读一行要来回拖，
             改为纵向卡片后信息一眼可见 */}
-        <div className="divide-y divide-border/40 md:hidden">
-          {paged.rows.map((a) => (
-            <div key={a.file} className="space-y-2.5 px-3.5 py-3">
+        <div className="divide-y divide-border/40 lg:hidden">
+          {paged.rows.map((a) => (<div key={a.file} className="space-y-2.5 px-3.5 py-3">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex min-w-0 flex-1 items-start gap-2.5">
                   {renderAvatar(a)}
                   <div className="min-w-0">
                     <div
                       className={
-                        'truncate text-sm font-medium ' + (a.is_expired ? 'text-muted-foreground' : '')
+                        'break-all whitespace-normal text-sm font-medium ' + (a.is_expired ? 'text-muted-foreground' : '')
                       }
                     >
                       {a.nickname || t('accounts.unnamed')}
                     </div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">{a.uid}</div>
+                    <div className="mt-1 font-mono text-[11px] text-muted-foreground"><AccountUid uid={a.uid} /></div>
                     {a.note ? (
                       <div className="truncate text-[11px] text-muted-foreground" title={a.note}>
                         {t('accounts.noteLabel')}{a.note}
@@ -1440,52 +1456,49 @@ export default function AccountsPage() {
                     ) : null}
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <div className="flex shrink-0 flex-col items-end gap-1">
                   {renderStatus(a)}
                   {renderModelLimit(a)}
+                  {isAdmin && renderMoreActions(a)}
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Coins className="h-3.5 w-3.5 text-muted-foreground" />
-                  {renderCredits(a)}
-                </div>
-                {renderExpiry(a)}
+              <div className="grid grid-cols-2 gap-4">
+                  <div className="min-w-0"><div className="mb-1 text-[11px] text-muted-foreground">{t('metric.credits')}</div>{renderCredits(a)}</div>
+                  <div className="min-w-0"><div className="mb-1 text-[11px] text-muted-foreground">{t('accounts.colExpiry')}</div>{renderExpiry(a)}</div>
               </div>
 
               {hasProxyUi && (
                 <div className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">{t('accounts.proxyLine')}</span>{renderProxy(a)}</div>
               )}
-              {isAdmin && renderActions(a)}
-            </div>
-          ))}
+
+            </div>))}
         </div>
 
         {/* 桌面端：表格 */}
-        <div className="hidden md:block">
-        <Table>
+        <div className="hidden lg:block">
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow className="border-b border-border/60 hover:bg-transparent">
-              <TableHead className="pl-4 text-[11px] text-muted-foreground">{t('accounts.colNickname')}</TableHead>
-              <TableHead className="text-[11px] text-muted-foreground">UID</TableHead>
+              <TableHead className="w-[30%] pl-4 text-[11px] text-muted-foreground">{t('accounts.colNickname')}</TableHead>
+
               <TableHead className="text-[11px] text-muted-foreground">{t('accounts.colStatus')}</TableHead>
               <TableHead className="text-[11px] text-muted-foreground">{t('metric.credits')}</TableHead>
               <TableHead className="text-[11px] text-muted-foreground">{t('accounts.colExpiry')}</TableHead>
               {hasProxyUi && <TableHead className="text-[11px] text-muted-foreground">{t('accounts.proxyLine')}</TableHead>}
-              {isAdmin && <TableHead className="whitespace-nowrap pr-4 text-right text-[11px] text-muted-foreground">{t('accounts.colActions')}</TableHead>}
+              {isAdmin && <TableHead className="w-[76px] whitespace-nowrap pr-4 text-right text-[11px] text-muted-foreground">{t('accounts.colActions')}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paged.rows.map((a) => (
-              <TableRow key={a.file} className="border-b border-border/40">
+            {paged.rows.map((a) => (<TableRow key={a.file} className="border-b border-border/40">
                 <TableCell className="pl-4">
                   <div className="flex items-center gap-2.5">
                     {renderAvatar(a)}
                     <div className="min-w-0">
-                      <div className={'truncate text-sm font-medium ' + (a.is_expired ? 'text-muted-foreground' : '')}>
+                      <div title={a.nickname} className={'break-all whitespace-normal text-sm font-medium ' + (a.is_expired ? 'text-muted-foreground' : '')}>
                         {a.nickname || t('accounts.unnamed')}
                       </div>
+                      <div className="mt-1"><AccountUid uid={a.uid} /></div>
                       {a.note ? (
                         <div className="truncate text-[11px] text-muted-foreground" title={a.note}>
                           {t('accounts.noteLabel')}{a.note}
@@ -1505,7 +1518,7 @@ export default function AccountsPage() {
                     </Badge>
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{a.uid}</TableCell>
+
                 <TableCell>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {renderStatus(a)}
@@ -1515,9 +1528,8 @@ export default function AccountsPage() {
                 <TableCell>{renderCredits(a)}</TableCell>
                 <TableCell>{renderExpiry(a)}</TableCell>
                 {hasProxyUi && <TableCell>{renderProxy(a)}</TableCell>}
-                {isAdmin && <TableCell className="whitespace-nowrap pr-4">{renderActions(a)}</TableCell>}
-              </TableRow>
-            ))}
+                {isAdmin && <TableCell className="pr-4 text-right">{renderMoreActions(a)}</TableCell>}
+              </TableRow>))}
           </TableBody>
         </Table>
         </div>
@@ -1595,8 +1607,7 @@ export default function AccountsPage() {
             </div>
           </div>
         )}
-      </section>
-      )}
+      </section>)}
 
       {/* 签到与任务记录已独立成页（账号一多，堆在本页会越滑越长） */}
       <div className="flex flex-wrap items-center gap-2 px-1 text-[11px] text-muted-foreground">
