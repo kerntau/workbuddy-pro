@@ -1,7 +1,7 @@
 'use client';
 
 import {memo, useEffect} from 'react';
-import {usePathname, useRouter} from 'next/navigation';
+import {useRouter} from 'next/navigation';
 import {ManagementBar} from '@/components/common/layout/ManagementBar';
 import {CommandPalette} from '@/components/common/layout/CommandPalette';
 import {LanguageToggle} from '@/components/common/layout/LanguageToggle';
@@ -18,7 +18,6 @@ export default function MainLayout({
 }) {
   const {me, loading} = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
 
   // 等会话确认后再显示管理界面，避免首次访问时短暂露出后台。
   useEffect(() => {
@@ -34,7 +33,7 @@ export default function MainLayout({
         <div className="flex flex-1 flex-col">
           <div className="@container/main flex flex-1 flex-col gap-2">
             <div className="flex min-h-0 flex-1 flex-col px-4 pt-12 py-8 sm:px-6 md:px-8 lg:px-12">
-              <div className={`mx-auto flex min-h-0 w-full ${pathname.replace(/\/$/, '') === '/accounts' ? 'max-w-[1600px]' : 'max-w-7xl'} flex-1 flex-col gap-4 pb-24 md:gap-6`}>
+              <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 pb-24 md:gap-6">
                 {/*
                   版本切换固定在右上角：底栏是照 LDC 原样保留的，控件不往那里加。
                   移动端只显示图标（compact），避免窄屏被它占掉一行。
