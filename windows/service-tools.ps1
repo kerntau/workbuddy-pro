@@ -30,6 +30,8 @@ if (Test-Path $envPath) {
     foreach ($line in Get-Content $envPath) {
         if ($line -match '^\s*WB_MANAGER_HOST\s*=\s*(\S+)') { $bindHost = $Matches[1] }
         elseif ($line -match '^\s*WB_MANAGER_PORT\s*=\s*(\S+)') { $bindPort = $Matches[1] }
+        elseif ($line -match '^\s*WB_TIMEZONE\s*=\s*(\S+)') { $env:TZ = $Matches[1] }
+        elseif ($line -match '^\s*TZ\s*=\s*(\S+)') { $env:TZ = $Matches[1] }
     }
 }
 $port = [int]$bindPort
@@ -76,6 +78,9 @@ function Start-Manager {
     # UnicodeDecodeError，任务记录页拿不到上游日志。子进程继承这里的变量。
     $env:PYTHONUTF8 = '1'
     $env:PYTHONIOENCODING = 'utf-8'
+    # 统计日界使用的时区（与容器部署一致）。Windows 若是 UTC 时区，北京时间
+    # 00:00–08:00 会仍算前一天。需要别的时区可在 .env 里设 WB_TIMEZONE。
+    if (-not $env:TZ) { $env:TZ = 'Asia/Shanghai' }
     $uvicornArgs = @(
         '-m', 'uvicorn', 'server.main:app',
         '--env-file', '.env',

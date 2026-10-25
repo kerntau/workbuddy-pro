@@ -784,6 +784,18 @@ export interface StatsSummary {
     week_4xx: number;
     week_5xx: number;
   };
+  /**
+   * 服务端统计时区的「今天」（`YYYY-MM-DD`）。
+   *
+   * 用量按服务端本地日累计，而浏览器可能位于别的时区。前端用它给趋势图补零、
+   * 标日期，避免「服务端还是昨天、浏览器已经第二天」时把前一天的数据当成今天。
+   * 可选：老版本后端不返回，前端回退到浏览器本地日期。
+   */
+  today?: string;
+  /** 服务端统计时区的当前小时（0-23），用于小时图的「现在」标记与未来时段留空。 */
+  now_hour?: number;
+  /** 服务端统计时区的 UTC 偏移标签（例如 `UTC+08:00`），在日期旁注明口径。 */
+  tz_label?: string;
 }
 
 export interface IpRule {

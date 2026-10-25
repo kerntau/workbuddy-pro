@@ -182,7 +182,19 @@ export default function StatsPage() {
 
   const summary: StatsSummary | null = values.summary ?? null;
   const rangeUsage = useMemo(() => summarizeUsage(values.daily), [values.daily]);
-  const topModel = values.byModel?.[0]?.name;
+  /**
+   * 日界跟服务端走，不跟浏览器走。
+   *
+   * 用量按服务端本地日累计（`server/db.py` 的 `day_of` / `day_sql`），浏览器
+   * 若在别的时区，`new Date()` 可能已经是「第二天」而服务端仍是前一天——图表
+   * 会把前一天的数据画到今天的格子里。`summary.today` / `now_hour` 由后端按
+   * 统计时区给出；旧版后端没有这两个字段时才回退到浏览器时间。
+   */
+  const statsToday = summary?.today || todayKeyLocal();
+  const statsNowHour = typeof summary?.now_hour === 'number'
+    ? summary.now_hour
+    : new Date().getHours();
+  const tzLabel = summary?.tz_label;
   const daily: UsagePoint[] = values.daily ?? EMPTY_POINTS;
   const byModel: UsageBreakdown[] = values.byModel ?? EMPTY_BREAKDOWN;
   const byKey: UsageBreakdown[] = values.byKey ?? EMPTY_BREAKDOWN;
@@ -207,14 +219,14 @@ export default function StatsPage() {
    *  · 多日 → 按天并补齐到窗口长度（缺的那天不再是「凭空消失」而是画成 0）。
    */
   const chartData: ChartPoint[] = spec.granularity === 'hour'
-    ? hourlySeries(hourly, new Date().getHours())
-    : dailySeries(daily, d, todayKeyLocal());
+    ? hourlySeries(hourly, statsNowHour)
+    : dailySeries(daily, d, statsToday);
 
   const rangeFailed = rangeUsage?.failed ?? 0;
   const chartUnavailable = spec.granularity === 'hour'
     ? !values.hourly && 'hourly' in errors
     : !values.daily && 'daily' in errors;
-  const dateFrom = dailySeries([], d, todayKeyLocal())[0].full;
+  const dateFrom = dailySeries([], d, statsToday)[0].full;
 
   /**
    * 页头抽成变量，是为了让下面「首屏骨架 / 错误态」那一段也带上它——
@@ -358,27 +370,19 @@ export default function StatsPage() {
         <StatCard
           label={t('stats.rangeRequests')}
           value={rangeUsage ? fmtNumber(rangeUsage.requests) : '—'}
-          hint={rangeUsage
-            ? rangeFailed > 0
-              ? t('stats.rangeFailedHint', {n: fmtNumber(rangeFailed)})
-              : t('stats.tokenHint', {v: fmtCompact(rangeUsage.tokens)})
-            : t('state.partialFailed')}
           icon={Activity}
           tone={rangeFailed > 0 ? 'warning' : 'info'}
-          hintTone={rangeFailed > 0 ? 'warning' : undefined}
         />
         <StatCard
           label={t('stats.rangeTokens')}
           value={<span title={rangeUsage ? `${fmtNumber(rangeUsage.tokens)} Token` : undefined}>{fmtCompact(rangeUsage?.tokens)}</span>}
-          hint={t('stats.tokenDetailHint')}
           icon={TrendingUp}
           tone="accent"
           delay={0.05}
         />
         <StatCard
           label={t('stats.rangeCredit')}
-          value={fmtCredit(rangeUsage?.credit)}
-          hint={t('stats.recordedCreditHint')}
+          value={<span title={t('stats.recordedCreditHint')}>{fmtCredit(rangeUsage?.credit)}</span>}
           icon={Coins}
           tone="warning"
           delay={0.1}
@@ -386,7 +390,6 @@ export default function StatsPage() {
         <StatCard
           label={t('stats.rangeKeys')}
           value={values.byKey ? fmtNumber(byKey.length) : '—'}
-          hint={topModel ? t('stats.rangeTopModel', {model: topModel}) : undefined}
           icon={KeyRound}
           tone="success"
           delay={0.15}
@@ -394,23 +397,34 @@ export default function StatsPage() {
       </section>
 
       <section className="rounded-[20px] bg-muted p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <div className="text-sm font-medium">{t('stats.tokenTrend')}</div>
-          {/* 副标题必须与**实际粒度**一致：今日是按小时画的，写「按天聚合」就是
-              在骗人（这也是最早那版的表现：选择器说今日、图是一根柱子）。 */}
-          <div className="text-[11px] text-muted-foreground">
-            {spec.granularity === 'hour' ? t('stats.hourlyAgg') : t('stats.dailyAgg')}
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {rangeFailed > 0 && (
+              <span className="font-medium text-amber-600 dark:text-amber-400">
+                {t('stats.rangeFailedShort', {n: fmtNumber(rangeFailed)})}
+              </span>
+            )}
+            {/* 副标题必须与**实际粒度**一致：今日是按小时画的，写「按天聚合」就是
+                在骗人（这也是最早那版的表现：选择器说今日、图是一根柱子）。 */}
+            <span>{spec.granularity === 'hour' ? t('stats.hourlyAgg') : t('stats.dailyAgg')}</span>
           </div>
         </div>
         <div className="mb-2 flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
-          <span>{dateFrom} — {todayKeyLocal()}{d === 1 ? ` · ${t('stats.throughNow')}` : ''}</span>
+          <span>
+            {dateFrom} — {statsToday}
+            {d === 1 ? ` · ${t('stats.throughNow')}` : ''}
+            {tzLabel ? ` · ${tzLabel}` : ''}
+          </span>
           <span>{t('stats.axisNote')}</span>
         </div>
         <div className="h-[260px] w-full">
           {chartUnavailable ? <LoadError message={t('stats.breakdownUnavailable')} onRetry={retry} /> : chartData.length ? (<ResponsiveContainer width="100%" height="100%">
               {/* 用 ComposedChart 而不是 BarChart：BarChart 会忽略非 Bar 子组件，
                   失败曲线（Line）根本不会被渲染 —— 实测踩过，图上一条线都没有。 */}
-              <ComposedChart data={spec.granularity === "hour" ? chartData.map((p,i) => i > new Date().getHours() ? {...p,tokens:null,failed:null} : p) : chartData} margin={{top: 4, right: 8, bottom: 0, left: -8}} barCategoryGap="20%">
+              <ComposedChart data={spec.granularity === 'hour'
+                ? chartData.map((p, i) => i > statsNowHour ? {...p, tokens: null, failed: null} : p)
+                : chartData} margin={{top: 4, right: 8, bottom: 0, left: -8}} barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis
                   dataKey="label"
@@ -418,8 +432,13 @@ export default function StatsPage() {
                   axisLine={false}
                   fontSize={11}
                   stroke="var(--muted-foreground)"
-                  /* 24 个小时（或 90 天）标签全画出来会糊成一片，按 spec 抽稀。 */
-                  interval={Math.max(0, spec.tickEvery - 1)}
+                  /* 今日 24 个小时桶：让 Recharts 按可用宽度自动选间隔（桌面约
+                     每 2 小时、手机每 7 小时），窄屏上标签不会互相压住；多日仍
+                     按 spec 的 tickEvery 抽稀。 */
+                  interval={spec.granularity === 'hour'
+                    ? 'equidistantPreserveStart'
+                    : Math.max(0, spec.tickEvery - 1)}
+                  minTickGap={36}
                 />
                 <YAxis tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted-foreground)" tickFormatter={(v) => fmtCompact(Number(v))} />
                 <YAxis yAxisId="failed" orientation="right" allowDecimals={false} width={38} tickLine={false} axisLine={false} fontSize={11} stroke="var(--destructive)" />
@@ -609,7 +628,7 @@ function BreakdownPanel({
               <TableHead className="text-[11px] text-muted-foreground">{t('metric.requestsShort')}</TableHead>
               <TableHead className="text-[11px] text-muted-foreground">Token</TableHead>
               {throughput && (
-                <TableHead className="whitespace-nowrap text-[11px] text-muted-foreground">
+                <TableHead className="hidden whitespace-nowrap text-[11px] text-muted-foreground sm:table-cell">
                   {t('stats.tokensPerSec')}
                 </TableHead>
               )}
@@ -638,14 +657,16 @@ function BreakdownPanel({
                   </TableCell>
                   <TableCell className="text-xs tabular-nums">{fmtNumber(it.requests)}</TableCell>
                   <TableCell className="text-xs tabular-nums">
-                    <span title={`${fmtNumber(tokens)} Token`}>{fmtCompact(tokens)}</span>
-                    <div className="mt-1 space-y-0.5 whitespace-nowrap text-[10px] leading-4 text-muted-foreground">
-                      <div>{t('stats.inputTokens', {n: fmtNumber(it.prompt_tokens)})}</div>
-                      <div>{t('stats.outputTokens', {n: fmtNumber(it.completion_tokens)})}</div>
+                    <div title={`${fmtNumber(tokens)} Token · ${t('stats.inputTokens', {n: fmtNumber(it.prompt_tokens)})} · ${t('stats.outputTokens', {n: fmtNumber(it.completion_tokens)})}`}>
+                      <span>{fmtCompact(tokens)}</span>
+                      <div className="mt-1 space-y-0.5 whitespace-nowrap text-xs leading-4 text-muted-foreground">
+                        <div>{t('stats.inputTokens', {n: fmtCompact(it.prompt_tokens)})}</div>
+                        <div>{t('stats.outputTokens', {n: fmtCompact(it.completion_tokens)})}</div>
+                      </div>
                     </div>
                   </TableCell>
                   {throughput && (
-                    <TableCell className="whitespace-nowrap text-xs tabular-nums">
+                    <TableCell className="hidden whitespace-nowrap text-xs tabular-nums sm:table-cell">
                       {typeof it.tokens_per_sec === 'number' ? (
                         <span title={t('stats.throughputHint', {n: it.throughput_samples ?? 0})}>
                           {it.tokens_per_sec.toFixed(1)}

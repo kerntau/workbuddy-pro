@@ -20,6 +20,10 @@ if (-not $python) {
 # 3. 编码设置与参数解析
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
+# 统计日界使用的时区（与容器部署一致）。用量按本地日累计，Windows 若是 UTC
+# 时区，北京时间 00:00–08:00 会仍算前一天。需要别的时区可在 .env 里设
+# WB_TIMEZONE（由 server/config.py 读取），或直接改这里的默认值。
+if (-not $env:TZ) { $env:TZ = 'Asia/Shanghai' }
 
 $bindHost = '127.0.0.1'
 $bindPort = '7864'
@@ -28,6 +32,8 @@ if (Test-Path $envPath) {
     foreach ($line in Get-Content $envPath) {
         if ($line -match '^\s*WB_MANAGER_HOST\s*=\s*(\S+)') { $bindHost = $Matches[1] }
         elseif ($line -match '^\s*WB_MANAGER_PORT\s*=\s*(\S+)') { $bindPort = $Matches[1] }
+        elseif ($line -match '^\s*WB_TIMEZONE\s*=\s*(\S+)') { $env:TZ = $Matches[1] }
+        elseif ($line -match '^\s*TZ\s*=\s*(\S+)') { $env:TZ = $Matches[1] }
     }
 }
 

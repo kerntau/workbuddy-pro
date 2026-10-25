@@ -32,10 +32,12 @@ import {
   expiryBarPercent,
   expiryVisual,
   fmtCompact,
+  fmtCredit,
   fmtDateTime,
   fmtNumber,
   fmtRemain,
 } from '@/lib/format';
+import {dailySeries, todayKeyLocal} from '@/lib/usage-chart';
 import {
   accountGroups,
   accountKey,
@@ -388,15 +390,22 @@ export default function DashboardPage() {
     [dailyGroup, scopedExpiries, nextExpiry],
   );
 
-  const chartData = daily.map((d) => ({
-    day: d.day.slice(5),
-    requests: d.requests,
-    tokens: d.prompt_tokens + d.completion_tokens,
-    // 失败数与请求数是**两条独立的数据来源**（前者取自请求日志，后者取自用量
-    // 汇总），所以曲线不会互相覆盖：某天「requests=0 但 failed=31」是完全
-    // 可能的形态（全池中断），图上看得出「那天出过事」而不是「没有请求」。
-    failed: d.failed ?? 0,
-  }));
+  /**
+   * 趋势图固定 14 天，并以**服务端统计时区的今天**收尾。
+   *
+   * 只画后端返回的行时，今天还没产生调用的话最后一点就是昨天——过了零点页面
+   * 看起来仍停在昨天（用户反馈）。补零到今天后，日切在卡片和图上同时发生。
+   * `summary.today` 由后端按统计时区给出；旧版后端没有该字段时回退到浏览器日期。
+   */
+  const chartData = useMemo(
+    () => dailySeries(daily, 14, summary?.today || todayKeyLocal()).map((p) => ({
+      day: p.label,
+      requests: p.requests,
+      tokens: p.tokens,
+      failed: p.failed,
+    })),
+    [daily, summary?.today],
+  );
 
   /** 今日失败总数（4xx + 5xx）。用于今天那张卡片的提示与色调。 */
   const todayFailed =
@@ -582,7 +591,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="h-[220px] w-full">
-            {chartData.length ? (
+            {daily.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{top: 4, right: 8, bottom: 0, left: 0}}>
                   <defs>
@@ -592,7 +601,7 @@ export default function DashboardPage() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted-foreground)" />
+                  <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted-foreground)" minTickGap={24} />
                   <YAxis tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted-foreground)" />
                   <Tooltip
                     contentStyle={{
@@ -725,7 +734,7 @@ export default function DashboardPage() {
                   <LineChart data={flow.daily} margin={{top: 4, right: 4, bottom: 0, left: 0}}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={11}
-                           stroke="var(--muted-foreground)" />
+                           stroke="var(--muted-foreground)" minTickGap={24} />
                     {/* 双 Y 轴：收入常是几千、支出常是几十。同一根轴会把支出压成
                         贴着 0 的直线，等于没画。左轴收入、右轴支出，颜色与曲线对应。 */}
                     <YAxis yAxisId="inc" tickLine={false} axisLine={false} fontSize={11}
@@ -1044,7 +1053,9 @@ function CreditFlowTile({label, value, tone, title}: {
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className={'mt-1 text-lg font-semibold tabular-nums ' + color}>
         {sign}
-        {fmtNumber(Math.abs(value))}
+        {/* 整数不加小数；非整数按与用量页相同的两位小数显示，避免把浮点求和的
+            尾数（如 649.552）原样摊在卡片上。完整精度仍在图表的悬停提示里。 */}
+        {Number.isInteger(Math.abs(value)) ? fmtNumber(Math.abs(value)) : fmtCredit(Math.abs(value))}
       </div>
     </div>
   );

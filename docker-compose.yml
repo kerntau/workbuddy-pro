@@ -59,7 +59,9 @@ services:
     # 更新完成后容器内的进程会退出，靠它用新代码重新拉起。
     restart: unless-stopped
     environment:
-      TZ: Asia/Shanghai
+      # 统计日界使用的时区。用量按本地日累计；默认按产品主要使用地区（UTC+8），
+      # 需要别的时区可在 .env 里设 WB_TIMEZONE。
+      TZ: ${WB_TIMEZONE:-Asia/Shanghai}
       # 首启管理员密码；不设则随机生成并打印到日志（推荐首启后立即改）
       # WB_ADMIN_PASSWORD: "改成你的强密码"
       # 上游地址：若上游与本品在同一 compose 网络，用服务名；否则填宿主机地址

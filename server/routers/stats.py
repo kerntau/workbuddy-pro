@@ -43,6 +43,19 @@ def _epoch_since(days: int) -> int:
     return int(time.mktime(time.strptime(_since(days), '%Y-%m-%d')))
 
 
+def _tz_label() -> str:
+    """当前进程时区的 UTC 偏移标签（例如 `UTC+08:00`）。
+
+    前端用它把「今天」的日界说清楚：统计按服务端时区的本地日累计，浏览器在
+    别的时区时，光看日期会以为数据没更新（用户反馈过「第二天还显示前一天」）。
+    """
+    offset = -(time.altzone if time.localtime().tm_isdst > 0 and time.daylight
+               else time.timezone)
+    sign = '+' if offset >= 0 else '-'
+    minutes = abs(offset) // 60
+    return f'UTC{sign}{minutes // 60:02d}:{minutes % 60:02d}'
+
+
 def _throughput_by_model(days: int, realm: str | None) -> dict[str, dict]:
     """按模型算**输出速率**（tokens/秒，issue #214）。
 
@@ -153,6 +166,11 @@ def summary(realm: str | None = None,
         'top_model': top['model'] if top else None,
         'usage_health': _usage_health(today, t_req, realm),
         'failures': _failures(realm),
+        # 统计时区与「现在」：前端据此对齐日界与小时桶，不依赖浏览器本地时区。
+        # 旧版后端没有这三个字段，前端会回退到浏览器时间。
+        'today': today,
+        'now_hour': int(time.strftime('%H')),
+        'tz_label': _tz_label(),
     }
 
 

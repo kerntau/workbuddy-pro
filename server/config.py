@@ -33,6 +33,23 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return v in ('1', 'true', 'yes', 'on')
 
 
+# 统计日界使用的时区。
+#
+# 用量按「本地日」累计（`db.day_of` / `db.day_sql` 的 `localtime`），所以**进程
+# 时区决定每天几点翻篇**。容器 compose 已显式设置 `TZ=Asia/Shanghai`，但宿主机
+# （systemd / Windows 原生）部署默认继承系统时区 —— 云服务器常常是 UTC，于是
+# 北京时间 00:00–08:00 仍算前一天：用户反馈「都第二天了首页还显示前一天的数量」。
+#
+# 未显式设置时默认按产品主要使用地区（UTC+8）；需要别的时区设 `WB_TIMEZONE`
+# 或 `TZ`。`tzset()` 只在 Unix 上存在：Windows 必须由启动脚本在 Python 启动
+# **之前**设置 TZ（进程内改环境变量不会影响 CRT 的时区缓存）。
+_TZ_NAME = _env('WB_TIMEZONE', '') or os.environ.get('TZ', '') or 'Asia/Shanghai'
+if os.environ.get('TZ') != _TZ_NAME:
+    os.environ['TZ'] = _TZ_NAME
+    if hasattr(time, 'tzset'):
+        time.tzset()
+
+
 PORT = _env_int('WB_MANAGER_PORT', 7864)
 HOST = _env('WB_MANAGER_HOST', '0.0.0.0')
 

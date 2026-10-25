@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from server import config, db  # noqa: E402
+from server.routers import stats  # noqa: E402
 
 
 def local_midnight_plus(minutes: int) -> int:
@@ -90,6 +91,17 @@ class UsageTimezone(unittest.TestCase):
         # 两者可能相等（UTC 时区），但我们的口径必须跟随本地时间
         self.assertEqual(ours, time.strftime('%Y-%m-%d', time.localtime(ts)))
         self.assertIsInstance(naive_utc, str)
+
+    def test_summary_reports_the_same_clock(self) -> None:
+        """总览必须把服务端的「今天 / 当前小时 / 时区」交给前端。
+
+        前端用它补零与标注日期。没有这些字段时，浏览器与服务端不在同一时区
+        会把前一天的用量画成今天（用户反馈：「都第二天了首页还显示前一天」）。
+        """
+        s = stats.summary(user={'username': 'a', 'role': 'admin'})
+        self.assertEqual(s['today'], time.strftime('%Y-%m-%d'))
+        self.assertEqual(s['now_hour'], int(time.strftime('%H')))
+        self.assertRegex(s['tz_label'], r'^UTC[+-]\d{2}:\d{2}$')
 
     # ── 不再重复计数 ────────────────────────────────────
     def test_backfill_after_bump_has_no_gap(self) -> None:

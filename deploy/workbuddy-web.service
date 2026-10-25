@@ -6,6 +6,9 @@ Wants=docker.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/workbuddy-manager
+# 统计日界使用的时区。用量按本地日累计，宿主机若是 UTC（云服务器默认），
+# 北京时间 00:00–08:00 会仍算前一天。下面的 EnvironmentFile 可覆盖本行。
+Environment=TZ=Asia/Shanghai
 Environment=WB_MANAGER_HOST=0.0.0.0
 Environment=WB_MANAGER_PORT=7864
 Environment=WB2API_BASE=http://127.0.0.1:7863
