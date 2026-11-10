@@ -546,6 +546,14 @@ class EventLoopResponsivenessTest(unittest.TestCase):
                     await asyncio.sleep(0.05)
 
             hb = asyncio.create_task(beat())
+            # 等心跳**真的跳动过一次**再开始计时：否则 coro_factory() 可能在
+            # beat() 获得第一次调度之前就返回，计数会是 0 —— 那是调度顺序，
+            # 不是「循环被冻住」，用它下结论会误判（CI 上偶发失败就是这里）。
+            # 注意不能用 `await asyncio.sleep(0)`：那会让 beat() 只跑一轮就
+            # 被后面的 stop.set() 打断，计数反而变成 1，把「不阻塞」的两条
+            # 用例一起弄坏。要等到 ticks 里真的有内容为止。
+            while not ticks:
+                await asyncio.sleep(0.005)
             with mock.patch('subprocess.run', side_effect=self._slow_docker(delay)):
                 await coro_factory()
             stop.set()
