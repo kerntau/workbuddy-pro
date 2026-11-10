@@ -40,7 +40,7 @@ sudo cat /opt/workbuddy-pro/data/initial-admin-password.txt
 
 - [使用指南](docs/usage.md) · [功能说明](docs/features.md) · [界面截图](docs/screenshots.md)
 - [部署与 HTTPS](deploy/README.md) · [开发说明](docs/development.md)
-- [API 令牌](docs/api-tokens.md) · [账号代理](docs/account-proxy-routes.md)
+- [API 令牌](docs/api-tokens.md) · [账号代理](docs/account-proxy-routes.md) · [页面监控](docs/watchdog.md)
 - [安全说明](docs/security-notes.md) · [安全审计](docs/SECURITY-AUDIT.md) · [发布包校验](docs/release-signing.md)
 
 ## 许可与致谢

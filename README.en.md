@@ -40,7 +40,7 @@ Existing `/opt/workbuddy-manager` installations are reused; check the printed pa
 
 - [Usage](docs/usage.md) · [Features](docs/features.md) · [Screenshots](docs/screenshots.md)
 - [Deployment and HTTPS](deploy/README.md) · [Development](docs/development.md)
-- [API tokens](docs/api-tokens.md) · [Account proxy routes](docs/account-proxy-routes.md)
+- [API tokens](docs/api-tokens.md) · [Account proxy routes](docs/account-proxy-routes.md) · [Page monitoring](docs/watchdog.md)
 - [Security notes](docs/security-notes.md) · [Security audit](docs/SECURITY-AUDIT.md) · [Release verification](docs/release-signing.md)
 
 ## License and credits

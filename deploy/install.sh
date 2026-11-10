@@ -2,9 +2,8 @@
 # ============================================================
 # Workbuddy Pro 一键部署脚本（Ubuntu/Debian）
 #
-# 本项目管理端依赖上游 workbuddy2api（提供账号池与 OpenAI 兼容接口）。
-# 单独 clone 本仓库是跑不起来的 —— 本脚本会自动检测并安装上游，
-# 因此在一台干净机器上执行即可完成整套部署。
+# 管理端与上游 workbuddy2api（账号池 / OpenAI 兼容接口）作为一个安装单元：
+# 上游源码由本项目维护，随管理端 Release 包分发，不再单独 clone 外部仓库。
 #
 # 用法：
 #   sudo bash deploy/install.sh                # 完整安装（含上游）
@@ -12,10 +11,9 @@
 #   sudo APP_DIR=/opt/custom bash deploy/install.sh
 #
 # 上游源码从哪来（按优先级）：
-#   1) 发布包里自带的 upstream/             下载 Release 包时已内嵌，离线可装
+#   1) 发布包里自带的 upstream/             官方 Release 已内嵌，离线可装
 #   2) UPSTREAM_SRC=<本地目录或 tar.gz>     用你自己那份源码
-#   3) UPSTREAM_REPO=<git 地址>             从 git 拉（默认地址不可用，
-#                                           请指向你自己的副本 fork / 镜像）
+#   3) 目标目录里已有完整源码               老部署复用
 #
 # 说明：workbuddy2api 的账号登录（扫码）是交互式的，无法自动化；
 #       安装完成后通过本管理端的「添加账号」扫码即可。
@@ -25,10 +23,6 @@ set -euo pipefail
 # ── 可配置项（均可用环境变量覆盖）─────────────────────────
 APP_DIR="${APP_DIR:-}"
 UPSTREAM_DIR="${UPSTREAM_DIR:-/opt/workbuddy2api}"
-# 上游原仓库 Sliverkiss/workbuddy2api 自 2026-09-23 起已不可访问（404）。
-# 默认值保留原地址只为「已有副本的人不必改代码」；新装请用 UPSTREAM_SRC
-# 指向本地源码，或把 UPSTREAM_REPO 改成你自己的副本。
-UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/Sliverkiss/workbuddy2api.git}"
 UPSTREAM_SRC="${UPSTREAM_SRC:-}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-7863}"
 MANAGER_PORT="${MANAGER_PORT:-7864}"
@@ -122,15 +116,26 @@ else
 
   # 上游源码的来源，按优先级：
   #   1) UPSTREAM_SRC 显式指定（目录 / .tar.gz / .zip）
-  #   2) **发布包里自带的 upstream/**（Release 包内嵌，离线可装：上游原仓库
-  #      源码随本项目的发布包分发）
-  #   3) 目标目录里已有的 .git（老部署，尝试 git pull）
-  #   4) 克隆 UPSTREAM_REPO（需要指向你自己的副本）
+  #   2) 发布包内自带的 upstream/（唯一官方来源）
+  #   3) 目标目录里已有完整的上游源码（老部署复用）
+  # 不再从外部 git 仓库克隆：上游已由本项目维护，随管理端 Release 分发。
   if [ -z "$UPSTREAM_SRC" ]; then
     BUNDLED="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/upstream"
     if [ -f "${BUNDLED}/docker-compose.yml" ]; then
       UPSTREAM_SRC="$BUNDLED"
       info "使用发布包内自带的上游源码：${BUNDLED}"
+    elif [ -f "${UPSTREAM_DIR}/docker-compose.yml" ]; then
+      info "沿用 ${UPSTREAM_DIR} 里已有的上游源码"
+    else
+      die "发布包里没有 upstream/，目标目录也没有上游源码。
+
+  请使用官方 Release 包（内含 upstream/）重跑，或显式指定源码：
+
+    sudo UPSTREAM_SRC=/path/to/upstream bash deploy/install.sh
+
+  已经手工装好上游、只想跳过这一步时用：
+
+    sudo bash deploy/install.sh --skip-upstream"
     fi
   fi
 
@@ -162,26 +167,6 @@ else
     fi
     [ -f "${UPSTREAM_DIR}/docker-compose.yml" ] || \
       die "本地源码里没有 docker-compose.yml，确认 UPSTREAM_SRC 指的是上游根目录"
-  elif [ -d "${UPSTREAM_DIR}/.git" ]; then
-    info "目录已存在，拉取最新代码"
-    ( cd "$UPSTREAM_DIR" && git pull --ff-only ) || warn "git pull 失败，沿用现有代码"
-  else
-    command -v git >/dev/null 2>&1 || die "需要 git 来克隆上游仓库（或改用 UPSTREAM_SRC 指定本地源码）"
-    info "克隆 ${UPSTREAM_REPO}"
-    if ! git clone --depth 1 "$UPSTREAM_REPO" "$UPSTREAM_DIR"; then
-      die "克隆上游仓库失败。
-
-  默认的上游地址已经克隆不下来。请改用下面任一方式后重跑：
-
-    # 1) 用本地那份源码（你已有部署时，就在 UPSTREAM_DIR，例如 /opt/workbuddy2api）
-    sudo UPSTREAM_SRC=/opt/workbuddy2api bash deploy/install.sh
-
-    # 2) 用你自己的副本（fork / 自有镜像）
-    sudo UPSTREAM_REPO=https://github.com/<你的账号>/workbuddy2api.git bash deploy/install.sh
-
-    # 3) 已经手工装好上游，只是让本脚本跳过
-    sudo bash deploy/install.sh --skip-upstream"
-    fi
   fi
 
   cd "$UPSTREAM_DIR"
@@ -253,6 +238,22 @@ step "2/4 管理端 Workbuddy Pro"
 
 mkdir -p "${APP_DIR}/data"
 
+# 服务账号：uid 10001 与容器形态对齐（上游容器内的进程就是这个 uid，双方才能
+# 共享 auths/ 与 config.json 的写权限）。uid 被占时退回 root 运行并明说，不硬凑
+# 别的 uid（那会让管理端写不了上游目录，问题更隐蔽）。
+RUN_USER=""
+if id workbuddy >/dev/null 2>&1; then
+  RUN_USER=workbuddy
+  ok "服务账号已存在：workbuddy"
+elif getent passwd 10001 >/dev/null 2>&1; then
+  warn "uid 10001 已被用户 $(id -un 10001) 占用，管理端将继续以 root 运行（沙箱降级）"
+else
+  useradd --system --uid 10001 --user-group \
+          --home-dir "${APP_DIR}" --shell /usr/sbin/nologin workbuddy
+  RUN_USER=workbuddy
+  ok "已创建服务账号 workbuddy（uid 10001）"
+fi
+
 if [ "${SRC_DIR}" != "${APP_DIR}" ]; then
   info "同步代码到 ${APP_DIR}"
   cp -r "${SRC_DIR}/server" "${APP_DIR}/"
@@ -306,10 +307,62 @@ sed -e "s#/opt/workbuddy-manager#${APP_DIR}#g" \
     -e "s#WB_UPSTREAM_CONFIG=/opt/workbuddy2api/config.json#WB_UPSTREAM_CONFIG=${UPSTREAM_DIR}/config.json#g" \
     "${APP_DIR}/deploy/workbuddy-web.service" > /etc/systemd/system/workbuddy-web.service
 
-# 若 venv 可用，改写 ExecStart 指向 venv
+# 若 venv 可用，改写 ExecStart 指向 venv（监听地址维持模板里的 0.0.0.0：
+# 本项目的一键部署面向直连访问，云平台安全组与 UFW 自行收紧）
 if [ "$RT_PY" != "$PY" ]; then
   sed -i "s#^ExecStart=.*#ExecStart=${APP_DIR}/venv/bin/python -m uvicorn server.main:app --host 0.0.0.0 --port ${MANAGER_PORT}#" \
     /etc/systemd/system/workbuddy-web.service
+fi
+
+# 降权与 docker 组：
+#   · root 回退（uid 冲突）时，去掉 unit 里的 User/Group 行，服务才能启动；
+#   · 上游为容器形态时管理端要访问 docker.sock（docker 组等同宿主 root，
+#     native 形态的用户可用 WBM_NO_DOCKER_GROUP=1 跳过，install 会顺手删掉
+#     unit 里的 SupplementaryGroups 行）。
+if [ -z "$RUN_USER" ]; then
+  sed -i '/^User=/d;/^Group=/d;/^SupplementaryGroups=/d' /etc/systemd/system/workbuddy-web.service
+  warn "服务以 root 运行：建议释放 uid 10001 后重跑本脚本"
+elif [ "${WBM_NO_DOCKER_GROUP:-0}" = "1" ]; then
+  sed -i '/^SupplementaryGroups=/d' /etc/systemd/system/workbuddy-web.service
+  info "按要求未加入 docker 组：容器形态上游的「重载 / 更新」界面功能将不可用"
+elif getent group docker >/dev/null 2>&1; then
+  usermod -aG docker "$RUN_USER"
+  warn "已将 ${RUN_USER} 加入 docker 组（等同宿主 root，仅用于操作上游容器）"
+else
+  sed -i '/^SupplementaryGroups=/d' /etc/systemd/system/workbuddy-web.service
+  warn "宿主无 docker 组（native 部署？），已去掉 SupplementaryGroups"
+fi
+
+# 目录属主交给服务账号：代码只读即可，data/ 要可写。
+# 上游目录也要交给它：面板的「一键更新」会把新源码写进 UPSTREAM_DIR
+# （auths/data 在步骤 1 已 chown 为 10001，与服务账号同一 uid，不受影响）。
+if [ -n "$RUN_USER" ]; then
+  chown -R "$RUN_USER:$RUN_USER" "${APP_DIR}"
+  if [ "$SKIP_UPSTREAM" -eq 0 ] && [ -d "${UPSTREAM_DIR}" ]; then
+    chown -R "$RUN_USER:$RUN_USER" "${UPSTREAM_DIR}"
+  fi
+  [ -f "${UPSTREAM_DIR}/config.json" ] && \
+    chown "$RUN_USER:$RUN_USER" "${UPSTREAM_DIR}/config.json" 2>/dev/null || true
+fi
+
+# polkit 授权：面板「一键更新」在宿主形态下由服务进程执行
+# `systemctl restart workbuddy-web`，非 root 需要显式授权。只放行这一个
+# unit 的管理动作，不给任何其他权限。没有 polkit 的精简系统不写
+# （那种环境一键更新会在重启一步提示手动执行，新代码本身已就位）。
+if [ -n "$RUN_USER" ] && [ -d /etc/polkit-1/rules.d ]; then
+  cat > /etc/polkit-1/rules.d/49-workbuddy-web.rules <<'POLKIT'
+// WorkBuddy Manager：允许服务账号重启自己的 unit（见 deploy/install.sh）。
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "workbuddy") {
+        var unit = action.lookup("unit");
+        if (unit == "workbuddy-web.service") {
+            return polkit.Result.YES;
+        }
+    }
+});
+POLKIT
+  ok "已写入 polkit 规则：${RUN_USER} 可重启 workbuddy-web.service（一键更新需要）"
 fi
 
 systemctl daemon-reload
@@ -387,7 +440,7 @@ cat <<EOF
   │  部署完成                                            │
   └──────────────────────────────────────────────────────┘
 
-  管理端      http://127.0.0.1:${MANAGER_PORT}   （监听 0.0.0.0:${MANAGER_PORT}；建议用防火墙/反代收紧）
+  管理端      http://127.0.0.1:${MANAGER_PORT}   （仅监听 127.0.0.1；公网访问请走反向代理）
   上游        http://127.0.0.1:${UPSTREAM_PORT}   （workbuddy2api，仅监听 127.0.0.1）
   配置目录    ${APP_DIR}
   账号目录    ${UPSTREAM_DIR}/auths

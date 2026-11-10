@@ -498,6 +498,52 @@ def _convert_tool_choice(choice: object, bridge: _ToolBridge | None = None) -> o
     return None
 
 
+def _structured_output_instruction(body: dict) -> str:
+    """把 Responses 的 `text.format` 转成模型可执行的 JSON 约束。
+
+    上游 Chat Completions 不消费 Responses 的 `text` 对象；只在网关侧丢掉它，
+    模型就会按自然语言回答（Codex guardian 的 JSON 校验因此恒失败，issue #258）。
+    这里把 json_schema / json_object 写成一条 system 指令，至少让模型知道必须返回
+    合法 JSON。`text.format.type == "text"`（默认）不产生任何改写。
+    """
+    text = body.get('text')
+    if not isinstance(text, dict):
+        return ''
+    fmt = text.get('format')
+    if not isinstance(fmt, dict):
+        return ''
+    kind = str(fmt.get('type') or '').strip().lower()
+    if kind == 'json_object':
+        return ('You must respond with a single valid JSON object. '
+                'Do not wrap it in markdown fences or add any text outside the JSON object.')
+    if kind != 'json_schema':
+        return ''
+    schema = fmt.get('schema')
+    if schema is None:
+        return ''
+    try:
+        schema_text = json.dumps(schema, ensure_ascii=False, separators=(',', ':'))
+    except (TypeError, ValueError):
+        return ''
+    name = str(fmt.get('name') or '').strip()
+    label = f' named {name!r}' if name else ''
+    return (f'You must respond with a single valid JSON object{label} that conforms '
+            f'exactly to this JSON Schema:\n{schema_text}\n'
+            'Do not wrap it in markdown fences or add any text outside the JSON object.')
+
+
+def _inject_structured_output(messages: list[dict], body: dict) -> None:
+    """把 JSON 约束接到第一条 system/developer 消息上；没有就新建一条。"""
+    instruction = _structured_output_instruction(body)
+    if not instruction:
+        return
+    if (messages and messages[0].get('role') in ('system', 'developer')
+            and isinstance(messages[0].get('content'), str)):
+        messages[0]['content'] = messages[0]['content'].rstrip() + '\n\n' + instruction
+    else:
+        messages.insert(0, {'role': 'system', 'content': instruction})
+
+
 def to_chat_request(body: dict, custom_tool_names: set[str] | None = None,
                     bridge: _ToolBridge | None = None) -> dict:
     """Responses 请求体 → Chat Completions 请求体。"""
@@ -550,6 +596,12 @@ def to_chat_request(body: dict, custom_tool_names: set[str] | None = None,
         # 只留最后一个会把前文丢掉（自审发现的边界）。
         pending_reasoning: str | None = None
 
+        # 已发出、尚未被结果消费的 tool_call id。
+        # 客户端可能只下发 function_call_output 而没有对应的 function_call
+        # （Codex 的 agent 创建会话就是这种形状），原样写成 role=tool 会让
+        # 上游以 11148 tool_call_mismatch 拒绝整段历史。
+        open_call_ids: list[str] = []
+
         def take_reasoning() -> str | None:
             """取走累积的推理文本并把状态清空。"""
             nonlocal pending_reasoning
@@ -593,6 +645,9 @@ def to_chat_request(body: dict, custom_tool_names: set[str] | None = None,
                 if not reuse_previous:
                     messages.append(msg)
                 tool_group_open = True
+                open_call_ids.extend(
+                    str(call.get('id') or '') for call in pending_calls if call.get('id')
+                )
                 pending_calls.clear()
 
         def flush_tool_group() -> None:
@@ -693,11 +748,36 @@ def to_chat_request(body: dict, custom_tool_names: set[str] | None = None,
                 # flush_tool_group；顺序即语义，图片属于这批工具调用）。
                 output = item.get('output')
                 out_text, out_images = _split_tool_output(output)
-                messages.append({
-                    'role': 'tool',
-                    'tool_call_id': str(item.get('call_id') or ''),
-                    'content': out_text,
-                })
+                raw_call_id = str(item.get('call_id') or '')
+                if raw_call_id:
+                    # 保持既有契约：带 call_id 的结果一律按 tool 消息处理
+                    if raw_call_id in open_call_ids:
+                        open_call_ids.remove(raw_call_id)
+                    messages.append({
+                        'role': 'tool',
+                        'tool_call_id': raw_call_id,
+                        'content': out_text,
+                    })
+                elif open_call_ids:
+                    # 客户端未下发 call_id：若恰好有未消费调用，按声明顺序配对
+                    matched_id = open_call_ids.pop(0)
+                    messages.append({
+                        'role': 'tool',
+                        'tool_call_id': matched_id,
+                        'content': out_text,
+                    })
+                else:
+                    # 无 call_id 且没有未消费调用 = 孤儿工具结果。
+                    # Codex 的 agent 创建会话就是这种形状：只有
+                    # function_call_output，没有对应的 function_call。
+                    # 直接写 role=tool 会被上游以 11148 tool_call_mismatch
+                    # 拒绝整段历史，这里降级为 user 消息以保留内容
+                    # （委派任务就在 output 里）。
+                    tool_name = str(item.get('name') or 'tool')
+                    messages.append({
+                        'role': 'user',
+                        'content': f'[tool output: {tool_name}]\n{out_text}',
+                    })
                 # 图片**不立即落**：插在两条 tool 结果之间会破坏上游的
                 # 成组配对校验（11148），等组结束由 flush_tool_group 补。
                 pending_tool_images.extend(out_images)
@@ -795,6 +875,7 @@ def to_chat_request(body: dict, custom_tool_names: set[str] | None = None,
                     attach_reasoning(prev, take_reasoning())
                     break
 
+    _inject_structured_output(messages, body)
     out['messages'] = messages
 
     if body.get('max_output_tokens') is not None:
@@ -1412,6 +1493,10 @@ class _StreamTranslator:
             out.append(_event('response.reasoning_summary_text.delta', {
                 'type': 'response.reasoning_summary_text.delta',
                 'output_index': self.reason_index,
+                # summary_index 是规范里的必填字段（summary 为数组，这里恒为第 0 段）。
+                # 缺了它，ai-sdk 的 zod 校验匹配不上任何具名分支，整帧落进
+                # unknown_chunk 兜底并被静默丢弃 —— 客户端只看到空的思考块（issue #348）。
+                'summary_index': 0,
                 'item_id': self.reason_id,
                 'delta': reasoning,
             }))
@@ -1609,12 +1694,19 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
         custom_tool_names = bridge.custom_names
         payload = to_chat_request(body, custom_tool_names, bridge)
     except Exception as exc:  # noqa: BLE001
-        gateway._record(key, ip, model, mapped or '', 400, 0, 0, 0, ua, str(exc), False)
+        gateway._record(key, ip, model, mapped or '', 400, 0, 0, 0, ua, str(exc), False,
+                        account_expected=False)
         return _failed(f'请求转换失败：{exc}', 400)
 
     if not payload.get('messages'):
         return _failed('input 为空：Responses 请求必须带 input 或 instructions',
                        400, 'invalid_request_error', 'empty_input')
+
+    # 思考档位（issue #319）：与 chat 路径同口径，把**实际发往上游**的
+    # reasoning_effort 记进请求日志。取转换后的 payload 而不是原始 body ——
+    # Responses 的档位藏在 reasoning.effort 里，转换后才变成 reasoning_effort。
+    effort = payload.get('reasoning_effort')
+    effort = effort.strip()[:16] if isinstance(effort, str) and effort.strip() else None
 
     if mapped:
         payload['model'] = mapped
@@ -1628,7 +1720,8 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
     try:
         upstream = upstreamsvc.resolve_for_key(key)
     except upstreamsvc.UpstreamUnavailable as exc:
-        gateway._record(key, ip, model, mapped or '', 503, 0, 0, 0, ua, str(exc), False)
+        gateway._record(key, ip, model, mapped or '', 503, 0, 0, 0, ua, str(exc), False,
+                        account_expected=False)
         return _failed(str(exc), 503, 'api_error', 'upstream_unavailable')
     url = f'{upstream["base_url"]}/v1/chat/completions'
     started = time.time()
@@ -1651,7 +1744,7 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
                 key, ip, model, mapped or '', resp.status_code,
                 _as_int(usage.get('prompt_tokens')), _as_int(usage.get('completion_tokens')),
                 latency, ua, None if resp.status_code < 400 else str(data)[:500], False,
-                usage=usage,
+                usage=usage, effort=effort,
             )
             if resp.status_code >= 400:
                 return _failed(_upstream_error_text(data, resp), resp.status_code,
@@ -1677,7 +1770,8 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
                 else 'invalid_custom_tool_arguments')
         except Exception as exc:  # noqa: BLE001
             latency = int((time.time() - started) * 1000)
-            gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), False)
+            gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), False,
+                            account_expected=gateway._account_expected_after_error(exc))
             return _failed(f'上游不可用：{exc}', 502)
 
     # ── 流式 ──
@@ -1689,7 +1783,8 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
         latency = int((time.time() - started) * 1000)
-        gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), True)
+        gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), True,
+                        account_expected=gateway._account_expected_after_error(exc))
         return _failed(f'上游不可用：{exc}', 502)
 
     # 上游直接报错：**开流之前**用真实状态码回掉。
@@ -1806,7 +1901,7 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
                 _as_int(usage.get('prompt_tokens')),
                 _as_int(usage.get('completion_tokens')),
                 latency, ua, error_text, True,
-                usage=usage, first_token=first_token_ms,
+                usage=usage, first_token=first_token_ms, effort=effort,
             )
 
     return StreamingResponse(gen(), status_code=200, media_type='text/event-stream')

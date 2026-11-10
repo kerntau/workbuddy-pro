@@ -9,6 +9,16 @@ WorkingDirectory=/opt/workbuddy-manager
 # 统计日界使用的时区。用量按本地日累计，宿主机若是 UTC（云服务器默认），
 # 北京时间 00:00–08:00 会仍算前一天。下面的 EnvironmentFile 可覆盖本行。
 Environment=TZ=Asia/Shanghai
+# 以专用账号运行（install.sh 创建，uid 10001 与容器形态对齐，便于共享上游
+# 的 auths/ 与 config.json 写权限）。管理端是攻击面最大的常驻进程，不能以
+# root 跑：任何文件写类漏洞都会直达宿主最高权限。
+User=workbuddy
+Group=workbuddy
+# 上游以容器形态部署时，「重载上游 / 读上游日志 / 一键更新」需要访问
+# docker.sock（install.sh 会把服务账号加入 docker 组）。
+# 注意：docker 组等同宿主 root。若上游是 native 进程（WB2API_MODE=native），
+# 删掉下面这行可以去掉这个等价 root 的通道。
+SupplementaryGroups=docker
 Environment=WB_MANAGER_HOST=0.0.0.0
 Environment=WB_MANAGER_PORT=7864
 Environment=WB2API_BASE=http://127.0.0.1:7863
@@ -34,9 +44,28 @@ Environment=WB_GATEWAY_RATE_PER_MIN=120
 # 注意：EnvironmentFile 的值是**字面量**，别在值后面写行内注释。
 EnvironmentFile=-/opt/workbuddy-manager/.env
 
+# 本项目的一键部署默认直连访问：绑定全网卡，由云平台安全组与 UFW 收紧来源。
+# 走 HTTPS 反向代理时，可把这里与上面的 WB_MANAGER_HOST 改为 127.0.0.1。
 ExecStart=/usr/bin/python3 -m uvicorn server.main:app --host 0.0.0.0 --port 7864
 Restart=always
 RestartSec=3
+
+# ── 沙箱（最小权限）──────────────────────────────────────
+# 服务只需要：读写自己的 data/ 与上游目录、连 docker.sock（SupplementaryGroups）。
+# NoNewPrivileges：进程树内不能再提权（sudo/su/setuid 全失效）。
+# ProtectSystem=full：/usr /boot /etc 只读（应用目录在 /opt，不受影响）。
+# ProtectHome：/root /home 不可达。PrivateTmp：独立 /tmp。
+# RestrictAddressFamilies：只留 inet/inet6/unix（docker.sock 是 unix 套接字）。
+# CapabilityBoundingSet 置空：不携带任何 Linux capability 启动。
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target

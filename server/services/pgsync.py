@@ -278,6 +278,67 @@ def _is_mirror_table(name: str) -> bool:
     return str(name).startswith(_MIRROR_PREFIX)
 
 
+# 整表不随备份搬迁的控制面表。
+#
+# 备份的语义是「异地存一份数据」；但恢复是「把镜像灌回本地」，而镜像可能躺在
+# 别人的数据库里（云 PG、共享实例、或一份被改过的备份）。`api_tokens` 一旦能被
+# 镜像写回，就等于往镜像里塞一行攻击者自己算好的 sha256，恢复后直接以 admin
+# 范围调用管理面。因此整表排除。
+_CONTROL_TABLES = frozenset({'api_tokens'})
+
+
+def _is_control_table(name: str) -> bool:
+    return str(name) in _CONTROL_TABLES
+
+
+# `settings` 是混合表：既有业务配置，也有凭据和更新链路。整表排除会让
+# model_map / 每日任务 / 代理池 / IP 规则也一起丢掉，所以改成**按 key 白名单**
+# 同步：
+#   · 导出只带白名单里的 key，GitHub token、代理密码、镜像地址不会进 PG；
+#   · 恢复只删/写白名单里的 key，镜像改不了本机的更新链路与凭据；
+#   · 以后新增的 key 默认不同步，需要显式加进来，避免静默泄露。
+_SETTING_ALLOWLIST = frozenset({
+    'model_map',
+    'daily_tasks_plan',
+    'task_claim_schedule',
+    'token_refresh_plan',
+    'proxy_pool',
+    'proxy_sticky',
+    'global_proxy_enabled',
+    'security',
+})
+
+
+def _filter_rows(table: str, columns: list[str], rows: list) -> list:
+    """按表做**值级**过滤：settings 白名单 + 密钥明文抹掉；其它表原样返回。
+
+    settings：拿不到 `key` 列时返回空 —— 结构不认识就不搬，避免把整表（可能含
+    凭据）当成普通数据写进镜像。
+
+    api_keys：`key_plain` 置空。它只为「管理员在面板里再复制一次」而存在
+    （见 db.py 该列的说明），而镜像可能躺在别人的云 PG 里 —— 一份备份不该
+    帮别人把全部网关密钥（能直接花额度）带走。`key_hash` 照旧搬，恢复后
+    密钥仍然可用，只是**取不回明文**（界面上会说清是存量密钥）。
+    """
+    if not rows:
+        return rows
+    if table == 'api_keys':
+        try:
+            index = columns.index('key_plain')
+        except ValueError:
+            return rows        # 老库 / 老镜像没有这一列
+        return [tuple('' if i == index else v for i, v in enumerate(row))
+                for row in rows]
+    if table != 'settings':
+        return rows
+    try:
+        index = columns.index('key')
+    except ValueError:
+        return []
+    return [row for row in rows
+            if str(row[index]) in _SETTING_ALLOWLIST]
+
+
 # ── 数据源 / 目标（搬运的两端）──────────────────────────
 #
 # 抽出这一层是为了**可测**：导出与恢复的差别只是「谁当源、谁当目标」，
@@ -302,7 +363,8 @@ class _SqliteSource:
             "SELECT name FROM sqlite_master WHERE type='table' "
             "AND name NOT LIKE 'sqlite_%' ORDER BY name"
         ).fetchall()
-        return [str(r[0]) for r in rows]
+        return [str(r[0]) for r in rows
+                if not _is_control_table(r[0])]
 
     def columns(self, table: str) -> list[dict]:
         rows = self._conn.execute(f'PRAGMA table_info("{table}")').fetchall()
@@ -317,7 +379,10 @@ class _SqliteSource:
             chunk = cur.fetchmany(batch)
             if not chunk:
                 break
-            yield [tuple(r) for r in chunk]
+            filtered = _filter_rows(
+                table, columns, [tuple(r) for r in chunk])
+            if filtered:
+                yield filtered
 
     def close(self) -> None:
         self._conn.close()
@@ -336,7 +401,8 @@ class _PgSource:
                 "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' "
                 "ORDER BY table_name"
             )
-            return [str(r[0]) for r in cur.fetchall() if not _is_mirror_table(r[0])]
+            return [str(r[0]) for r in cur.fetchall()
+                    if not _is_mirror_table(r[0]) and not _is_control_table(r[0])]
 
     def columns(self, table: str) -> list[dict]:
         with self._conn.cursor() as cur:
@@ -359,7 +425,10 @@ class _PgSource:
                 chunk = cur.fetchmany(batch)
                 if not chunk:
                     break
-                yield [tuple(r) for r in chunk]
+                filtered = _filter_rows(
+                    table, columns, [tuple(r) for r in chunk])
+                if filtered:
+                    yield filtered
         finally:
             cur.close()
 
@@ -720,7 +789,24 @@ def import_from_pg(cfg: dict, reporter: _Reporter) -> dict:
                             continue
                         # 先清空再灌入：恢复的语义是「让本地等于镜像」，而不是合并
                         # —— 合并会把镜像里已经删掉的记录留在本地。
-                        conn.execute(f'DELETE FROM "{table}"')
+                        #
+                        # settings 例外：只删白名单 key。整表 DELETE 会把本机的
+                        # GitHub token / 代理密码 / 更新链路一起清掉，而这些 key
+                        # 本来就不在镜像里（导出时已过滤）。
+                        if table == 'settings':
+                            if 'key' not in wanted:
+                                reporter.log(
+                                    '跳过 settings（缺少 key 列，无法按白名单恢复）',
+                                    'warn')
+                                reporter.data['tables_done'] = index
+                                continue
+                            keys = sorted(_SETTING_ALLOWLIST)
+                            placeholders = ', '.join('?' * len(keys))
+                            conn.execute(
+                                f'DELETE FROM "settings" WHERE "key" IN ({placeholders})',
+                                keys)
+                        else:
+                            conn.execute(f'DELETE FROM "{table}"')
                         for chunk in src.rows(table, wanted, BATCH):
                             sink.write(table, wanted, chunk)
                         reporter.data['tables_done'] = index
@@ -746,7 +832,8 @@ def _local_tables(conn: sqlite3.Connection) -> set[str]:
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()
-    return {str(r[0]) for r in rows if not _is_mirror_table(r[0])}
+    return {str(r[0]) for r in rows
+            if not _is_mirror_table(r[0]) and not _is_control_table(r[0])}
 
 
 def _local_backup() -> Path | None:

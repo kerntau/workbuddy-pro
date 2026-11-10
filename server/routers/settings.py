@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import db, security
+from ..services import pricing
 from ..iputil import client_ip
-from ..services import modelmap, reload, updater, wb2api
+from ..services import autoupdate, modelmap, reload, updater, wb2api
 
 router = APIRouter(prefix='/api', tags=['settings'])
 
@@ -31,10 +34,17 @@ async def save_upstream(body: dict, request: Request,
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # 改上游配置会影响全部账号行为，且可能写入 device_token/base 等敏感项，必须留痕
+    # 改上游配置会影响全部账号行为，且可能写入 device_token/base 等敏感项，必须留痕。
+    # 顶层标量（如 reasoning_as_content）不属于任何段，单独列出——否则日志会显示
+    # 「段=」，看起来像什么都没改。
+    sections = ','.join(sorted(k for k in body if isinstance(body.get(k), dict)))
+    top_keys = ','.join(sorted(
+        f'{k}={body[k]}' for k in body
+        if not isinstance(body.get(k), dict) and k != 'listen'
+    ))
     security.audit(user, 'update_upstream', '',
-                   f"段={','.join(sorted(k for k in body if isinstance(body.get(k), dict)))}"
-                   f'；来源 {client_ip(request)}')
+                   f'段={sections}' + (f'；顶层={top_keys}' if top_keys else '')
+                   + f'；来源 {client_ip(request)}')
     # 上游只在启动时读 config.json，保存后自动重载使其生效
     result['reload_scheduled'] = reload.request_restart()
     # 无法自动重载上游时（没装 docker / 容器没挂 docker.sock），要如实告诉
@@ -107,6 +117,94 @@ def save_model_map(body: dict[str, str], user: dict = Depends(security.require_a
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.set_setting('model_map', clean)
     return clean
+
+# ── 计费价目（issue #380）────────────────────────────────
+#
+# 价目表默认随版本分发（server/services/pricing.json）。管理员可以在这里覆盖：
+# 官方调价后不必等上游发版，改完立刻生效。**只影响之后的调用** —— 已经落库的
+# 费用按当时的价目算好并存着，不会被改写（历史账不跟着变，见 pricing 模块说明）。
+@router.get('/settings/pricing')
+def get_pricing(user: dict = Depends(security.current_user)) -> dict:
+    """价目表 + 当前生效档 + 是否用了覆盖 + 节假日表缺哪些年份。"""
+    return pricing.describe()
+
+
+def _validate_pricing(body: Any) -> dict | None:
+    """校验覆盖价目：结构不对就 400，别把坏数据落库。
+
+    只拦「落库后一定算错」的形态：版本列表里每一条都得有可解析的
+    `effective_from` 和至少一个模型；单价必须是数字。宁可拒绝，也不要存进去
+    之后让整张费用表变成「—」——那种故障没有报错，只有沉默。
+    """
+    if body in (None, {}, []):
+        return None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='价目表必须是 JSON 对象')
+    versions = body.get('versions')
+    if versions is None:
+        return None
+    if not isinstance(versions, list):
+        raise HTTPException(status_code=400, detail='versions 必须是数组')
+    clean_versions: list[dict] = []
+    for idx, item in enumerate(versions):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail=f'第 {idx + 1} 条价目不是对象')
+        start = str(item.get('effective_from') or '').strip()
+        try:
+            time.strptime(start, '%Y-%m-%d')
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f'第 {idx + 1} 条价目的 effective_from 不是 YYYY-MM-DD：{start!r}',
+            ) from None
+        models = item.get('models')
+        if not isinstance(models, dict) or not models:
+            raise HTTPException(status_code=400,
+                                detail=f'第 {idx + 1} 条价目没有 models')
+        for name, table in models.items():
+            if not isinstance(table, dict):
+                raise HTTPException(status_code=400,
+                                    detail=f'{name} 的价目不是对象')
+            for field in ('cache_hit', 'cache_miss', 'output'):
+                band = table.get(field)
+                if band is None:
+                    continue
+                if not isinstance(band, dict):
+                    raise HTTPException(status_code=400,
+                                        detail=f'{name}.{field} 必须是 {{peak, off_peak}}')
+                for key, val in band.items():
+                    if key not in ('peak', 'off_peak'):
+                        raise HTTPException(status_code=400,
+                                            detail=f'{name}.{field} 只能有 peak / off_peak')
+                    if not isinstance(val, (int, float)) or isinstance(val, bool) or val < 0:
+                        raise HTTPException(status_code=400,
+                                            detail=f'{name}.{field}.{key} 必须是非负数字')
+            if 'cache_miss' not in table or 'output' not in table:
+                raise HTTPException(status_code=400,
+                                    detail=f'{name} 至少要给 cache_miss 与 output 两档价')
+        clean_versions.append(item)
+    out = {'versions': clean_versions}
+    if isinstance(body.get('model_aliases'), dict):
+        out['model_aliases'] = body['model_aliases']
+    if body.get('currency'):
+        out['currency'] = str(body['currency'])
+    return out
+
+
+@router.put('/settings/pricing')
+def save_pricing(body: Any = Body(None),
+                 user: dict = Depends(security.require_admin)) -> dict:
+    """保存（或清除）覆盖价目。传 null / 空对象 = 恢复成随版本分发的那份。
+
+    `Body(None)` 而不是 `Body(...)`：清除覆盖最自然的请求就是 body 为 `null`，
+    而 `...` 会把 null 判成「字段缺失」回 422 —— 界面上就变成「恢复默认」按钮
+    报错，还看不出是为什么。
+    """
+    clean = _validate_pricing(body)
+    pricing.set_override(clean)
+    pricing.invalidate()
+    return pricing.describe()
+
 
 # ── GitHub Token（版本检测 / 一键更新）────────────────────
 @router.get('/settings/github-token')
@@ -183,6 +281,54 @@ def save_github_mirror(body: dict, user: dict = Depends(security.require_admin))
     return get_github_mirror(user)
 
 
+# ── 自动更新 ─────────────────────────────────────────────────
+def _auto_update_payload() -> dict:
+    cfg = autoupdate.get_config()
+    state = autoupdate.get_state()
+    return {
+        **cfg,
+        'state': {
+            'last_check_at': int(float(state.get('last_check_at') or 0)),
+            'last_action': str(state.get('last_action') or ''),
+            'last_message': str(state.get('last_message') or ''),
+            'pending_version': str(state.get('pending_version') or ''),
+        },
+        # 当前环境能否连上游一起更新（不能时 target=auto 会退化成只更新管理端）
+        'docker_ok': updater.can_control_docker(),
+        # 部署形态不支持一键更新时（如 Windows 原生）给出原因，前端据此禁用开关
+        'unsupported_reason': autoupdate.unsupported_reason(),
+        # 面板显示「服务器本地时间」，时间窗按它算
+        'server_tz_offset_minutes': autoupdate.server_tz_offset_minutes(),
+    }
+
+
+@router.get('/settings/auto-update')
+def get_auto_update(user: dict = Depends(security.require_admin)) -> dict:
+    """自动更新配置 + 最近一次巡检的结果。"""
+    return _auto_update_payload()
+
+
+@router.put('/settings/auto-update')
+def save_auto_update(body: dict, user: dict = Depends(security.require_session_admin)) -> dict:
+    """保存自动更新配置。
+
+    与一键更新同一权限（需要会话管理员）：开了它就等于授权面板在无人值守时
+    自行下载并安装新版本、重启服务。
+    """
+    cfg, err = autoupdate.validate_config(body)
+    if cfg is None:
+        raise HTTPException(status_code=400, detail=err)
+    blocked = autoupdate.unsupported_reason()
+    if blocked and cfg['enabled']:
+        raise HTTPException(status_code=409, detail=blocked)
+    saved = autoupdate.save_config(cfg)
+    security.audit(user, 'update_auto_update', '',
+                   (f"开启，每 {saved['interval_hours']} 小时检测，"
+                    f"时间窗 {saved['window_start']:02d}–{saved['window_end']:02d}，"
+                    f"对象 {saved['target']}") if saved['enabled'] else '关闭')
+    return _auto_update_payload()
+
+
 # ── 管理端用户 ───────────────────────────────────────────
 class UserIn(BaseModel):
     username: str = Field(min_length=1, max_length=32)
@@ -213,8 +359,9 @@ def add_user(body: UserIn, request: Request,
     而这一步当时没有任何记录。新建用户写随机 sv，避免同名重建后旧 cookie 复活。
     """
     pw = str(body.password)
-    if len(pw) < 8:
-        raise HTTPException(status_code=400, detail='密码至少 8 位')
+    problem = security.password_problem(pw, body.username)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
     cfg = security.load_users()
     if any(u.get('username') == body.username for u in cfg.get('users', [])):
         raise HTTPException(status_code=409, detail='用户名已存在')
@@ -226,7 +373,9 @@ def add_user(body: UserIn, request: Request,
         'sv': secrets.randbelow(1 << 30),
     })
     security.save_users(cfg)
-    security.audit(user, 'add_user', body.username, f'角色={body.role}；来源 {client_ip(request)}')
+    ip = client_ip(request)
+    security.audit(user, 'add_user', body.username,
+                   f'角色={body.role}；来源 {ip}', ip=ip)
     return {'username': body.username, 'role': body.role}
 
 
@@ -250,9 +399,10 @@ def update_user(username: str, body: UserPatch, request: Request,
     changed_pwd = changed_role = False
     if body.password:
         pw = str(body.password)
-        # 现在不再接受空/极短口令：管理端是公网入口，弱口令等于没有防护
-        if len(pw) < 8:
-            raise HTTPException(status_code=400, detail='密码至少 8 位')
+        # 管理端是公网入口：弱口令等于没有防护，统一走与启动时相同的策略。
+        problem = security.password_problem(pw, username)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
         target['pwd_hash'] = security.make_hash(pw)
         changed_pwd = True
     if body.role and body.role != target.get('role'):
@@ -279,7 +429,9 @@ def update_user(username: str, body: UserPatch, request: Request,
             parts.append('改密码')
         if changed_role:
             parts.append('改角色')
-        security.audit(user, 'update_user', username, '、'.join(parts) + f'；来源 {client_ip(request)}')
+        ip = client_ip(request)
+        security.audit(user, 'update_user', username,
+                       '、'.join(parts) + f'；来源 {ip}', ip=ip)
     # 把自己的密码改了，当前会话也会失效——前端据此提示重新登录
     self_revoked = bool(changed_pwd and username == user.get('username'))
     return {

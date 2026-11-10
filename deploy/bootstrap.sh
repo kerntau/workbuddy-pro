@@ -39,6 +39,13 @@ wb_detect_system() {
   local directory port
   for directory in "$APP_DIR" "$UPSTREAM_DIR"; do
     [[ $directory =~ ^/[A-Za-z0-9._/-]+$ && $(realpath -m "$directory") != / ]] || wb_die '安装路径必须是绝对目录，仅支持英文、数字、点、下划线和连字符，且不能是 /。'
+    # 安装目录会被 chown -R 交给服务账号：指向 /opt、/home 这类公共目录会把
+    # 无关文件的所有权一起改掉，必须先拒绝。
+    case "$directory" in
+      /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/media|/mnt|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
+        wb_die "${directory} 太宽（chown -R 会波及整个目录）；请用 /opt/workbuddy-pro 这类专用目录。"
+        ;;
+    esac
   done
   APP_DIR=$(realpath -m "$APP_DIR")
   UPSTREAM_DIR=$(realpath -m "$UPSTREAM_DIR")

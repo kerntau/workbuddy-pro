@@ -21,6 +21,7 @@ import {
   FileText,
   KeyRound,
   Route,
+  Radar,
 } from 'lucide-react';
 import {usePathname} from 'next/navigation';
 import {notify} from '@/lib/toast';
@@ -54,6 +55,8 @@ import {PgSyncPanel} from '@/components/common/settings/PgSyncPanel';
 import {ProxyPanel} from '@/components/common/settings/ProxyPanel';
 import {TokensPanel} from '@/components/common/settings/TokensPanel';
 import {ChangelogPanel} from '@/components/common/settings/ChangelogPanel';
+import {WatchdogPanel} from '@/components/common/settings/WatchdogPanel';
+import {PricingPanel} from '@/components/common/settings/PricingPanel';
 import {UpstreamReloadNotice} from '@/components/common/settings/UpstreamReloadNotice';
 import {CopyButton} from '@/components/ui/copy-button';
 import {Button} from '@/components/ui/button';
@@ -232,7 +235,7 @@ const SCHEDULE_FIELDS: Field[] = [
     key: 'account_delay_max_seconds',
     kind: 'num',
     label: '账号最长间隔',
-    desc: '自动任务的账号随机间隔上限；两项填 0 保持原有间隔。开启后同一时刻的不同任务也依次运行，手动执行不受影响',
+    desc: '适用于上游自动任务、管理端每日计划和令牌续期；两项填 0 保持原行为，手动执行不受影响',
     unit: '秒',
     min: 0,
     max: 600,
@@ -242,7 +245,7 @@ const SCHEDULE_FIELDS: Field[] = [
     key: 'random_delay_minutes',
     kind: 'num',
     label: '每日任务随机延迟',
-    desc: '每天各类任务在原定整点后随机延迟 0～N 分钟；0 表示整点执行。同一天重启沿用原时刻，手动执行不受影响',
+    desc: '上游每天各类任务在原定整点后随机延迟 0～N 分钟；0 表示整点执行。同一天重启沿用原时刻，不改变管理端每日计划',
     unit: '分钟',
     min: 0,
     max: 60,
@@ -400,6 +403,16 @@ const POOL_FIELDS: Field[] = [
     def: 2,
   },
   {
+    key: 'credit_floor',
+    kind: 'num',
+    label: '保底积分',
+    desc: '账号可用积分低于该值时不再选它，换用其他账号；只有全部账号都低于保底时才会继续用。余额未同步的账号不参与判断，0 = 关闭',
+    unit: '积分',
+    min: 0,
+    max: 1000000,
+    def: 0,
+  },
+  {
     key: 'breaker_threshold',
     kind: 'num',
     label: '连续失败熔断阈值',
@@ -470,6 +483,15 @@ const FEATURES_FIELDS: Field[] = [
     kind: 'bool',
     label: '出站请求指纹脱敏',
     desc: '对发往上游的请求做轻量脱敏，降低被判定异常的概率。除非在排查问题，否则建议保持开启',
+    def: true,
+  },
+  {
+    key: 'reasoning_as_content',
+    kind: 'bool',
+    label: '思考内容兜底为正文',
+    desc: '模型在思考模式下正文为空时，把推理原文同时作为正文下发，避免只看正文的客户端'
+      + '显示空回复。代价：同时渲染推理与正文的客户端会把同一段话显示两遍'
+      + '（表现为「推理变成了正文」）。客户端能显示推理时建议关闭',
     def: true,
   },
 ];
@@ -596,6 +618,22 @@ const UPSTREAM_FIELDS: Field[] = [
     kind: 'bool',
     label: '透传客户端 IP',
     desc: '是否把客户端 IP（X-Forwarded-For / X-Real-IP）透传给上游。缺省关闭——不把内网/代理 IP 暴露给上游',
+    def: false,
+  },
+  {
+    key: 'gzip_body',
+    kind: 'bool',
+    label: '压缩大请求体（gzip）',
+    desc: '超过 64 KB 的对话请求先 gzip 压缩再发给上游。服务器出口带宽窄时长上下文的'
+      + '首字节能快 20 秒以上；短对话不压缩、无额外开销。上游不接受压缩时会自动改用未压缩重发',
+    def: true,
+  },
+  {
+    key: 'http2',
+    kind: 'bool',
+    label: '出站 HTTP/2',
+    desc: '让网关向腾讯发请求时优先协商 HTTP/2。默认关闭：现行 HTTP/1.1 路径经过长期验证；'
+      + '开启前请确认流式长连接与代理线路在目标网络可用',
     def: false,
   },
 ];
@@ -870,6 +908,14 @@ const FIELD_BY_KEY: Record<string, Field> = {};
 for (const g of GROUPS) for (const f of g.fields) FIELD_BY_KEY[f.key] = f;
 
 /**
+ * 界面归在某组、但在上游 config.json 里是**顶层**键的字段。
+ *
+ * 目前只有 reasoning_as_content（思考兜底）：它在上游是根级布尔，塞进
+ * features 段就等于写到错误路径、改了不生效。提交时必须提到顶层。
+ */
+const TOP_LEVEL_KEYS = new Set(['reasoning_as_content']);
+
+/**
  * 设置页的外壳（批次 4 的 P1-2：7 个 Tab 变成可寻址子路由）。
  *
  * **为什么外壳是 `layout.tsx` 而不是 `page.tsx`**：`/settings/upstream` 与
@@ -913,6 +959,7 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
     users: {icon: <Users className="h-3.5 w-3.5" />},
     tokens: {icon: <KeyRound className="h-3.5 w-3.5" />},
     system: {icon: <DownloadCloud className="h-3.5 w-3.5" />},
+    watchdog: {icon: <Radar className="h-3.5 w-3.5" />},
     backup: {icon: <Database className="h-3.5 w-3.5" />},
     changelog: {icon: <FileText className="h-3.5 w-3.5" />},
     about: {icon: <Info className="h-3.5 w-3.5" />},
@@ -1038,7 +1085,13 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
       prompt: pickValues(PROMPT_FIELDS, cfg.prompt),
       cooldown: pickValues(COOLDOWN_FIELDS, cfg.cooldown),
       pool: pickValues(POOL_FIELDS, cfg.pool),
-      features: pickValues(FEATURES_FIELDS, cfg.features),
+      // reasoning_as_content 在上游是**顶层**键（不在 features 段里），
+      // 但界面上跟其它功能开关放一组更自然。这里把顶层值并进视图，
+      // 保存时再由 saveGroup 提到顶层（见 TOP_LEVEL_KEYS）。
+      features: pickValues(FEATURES_FIELDS, {
+        ...cfg.features,
+        reasoning_as_content: cfg.reasoning_as_content,
+      }),
       session: pickValues(SESSION_FIELDS, cfg.session_sticky),
       server: pickValues(SERVER_FIELDS, cfg.server),
       upstream: pickValues(UPSTREAM_FIELDS, cfg.upstream),
@@ -1153,6 +1206,8 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
     }
     const org = original.current[group];
     const patch: Record<string, boolean | number | number[] | string> = {};
+    // 顶层键单独收：它们不属于任何段，必须放在请求体根上
+    const topPatch: Record<string, boolean | number | number[] | string> = {};
     for (const k of Object.keys(cur)) {
       if (cur[k] === org[k]) continue;
       const f = FIELD_BY_KEY[k];
@@ -1162,16 +1217,19 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
         notify.err(t('settings.fieldInvalid', {label: tp(f.label)}), w.error);
         return;
       }
-      patch[k] = w.value;
+      (TOP_LEVEL_KEYS.has(k) ? topPatch : patch)[k] = w.value;
     }
-    if (!Object.keys(patch).length) {
+    if (!Object.keys(patch).length && !Object.keys(topPatch).length) {
       notify.info(t('settings.noChanges'));
       return;
     }
     setBusy(true);
     try {
       const def = GROUPS.find((g) => g.id === group);
-      const saved = await settingsApi.saveUpstream({[def?.section ?? group]: patch});
+      const body: Record<string, unknown> = {...topPatch};
+      // 段内有改动时才带该段：只改顶层键时不要顺手回写整段
+      if (Object.keys(patch).length) body[def?.section ?? group] = patch;
+      const saved = await settingsApi.saveUpstream(body);
       // 容器部署下无法自动重载上游（需 docker 命令，而容器刻意不挂 docker 套接字），
       // 后端会带回 reload_hint —— 如实转达，不让人以为改完就生效了
       if (saved?.reload_hint) {
@@ -1917,6 +1975,10 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
 
         {/* ═══ 模型映射 ═══ */}
         <TabsContent value="models" className="mt-4 space-y-4">
+          {/* 计费价目（issue #380）挂在「模型管理」下面：它回答的是同一件事的
+              下半句——「这些模型用起来值多少钱」。单开一个 Tab 会改动导航清单
+              （项目把它钉死为 10 项，改数量要同步路线图与 CHANGELOG），不值得。 */}
+          <PricingPanel />
           <div className="rounded-[20px] bg-muted p-4">
             <div className="mb-1 text-sm font-medium">{t('settings.mapNewAlias')}</div>
             <div className="mb-3 text-[11px] text-muted-foreground">
@@ -2153,6 +2215,11 @@ export default function SettingsLayout({children}: {children: React.ReactNode}) 
         {/* ═══ 系统更新 ═══ */}
         <TabsContent value="system" className="mt-4 space-y-4">
           <UpdatePanel />
+        </TabsContent>
+
+        {/* ═══ 页面监控 ═══ */}
+        <TabsContent value="watchdog" className="mt-4 space-y-4">
+          <WatchdogPanel />
         </TabsContent>
 
         {/* ═══ 数据备份 ═══ */}

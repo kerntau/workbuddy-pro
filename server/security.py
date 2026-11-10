@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Request
 
 from . import config, tokensvc
 from .iputil import client_ip
+from .iputil import _is_trusted_proxy  # noqa: SLF001 —— 与 client_ip 同一份可信代理判据
 
 _fail: dict[str, list] = {}
 MAX_FAILS = 5
@@ -36,6 +37,91 @@ def verify_pwd(pwd: str, stored: str) -> bool:
         return hmac.compare_digest(digest.hex(), expect)
     except Exception:
         return False
+
+
+# ── 管理端密码策略 ─────────────────────────────────────
+#
+# 生产事故复盘：公网面板的 admin 密码被设成了 `admin123`，攻击者直接登录，
+# 导出了全部账号凭据。登录失败锁定拦不住「已知弱口令」——必须在设置密码时
+# 就拒绝，而不是等到被撞开以后。这里只做最小、确定的规则：
+#   · 至少 12 位；
+#   · 常见弱口令（含 admin/password/123456 等变体）直接拒绝；
+#   · 不允许「用户名 + 纯数字」；
+#   · 不允许纯数字或单一重复字符。
+# 不做复杂度打分/字典工程：规则越复杂越容易误伤，真正兜底的是长度与黑名单。
+MIN_PASSWORD_LENGTH = 12
+
+_WEAK_PASSWORDS = frozenset({
+    'admin', 'admin123', 'admin1234', 'admin12345', 'admin123456',
+    'admin1234567', 'admin12345678', 'admin123456789',
+    'password', 'password123', 'password1234', 'password12345',
+    '123456789012', '1234567890123', '12345678901234',
+    'qwertyuiop', 'qwerty123456', 'qwertyuiop123',
+    'workbuddy', 'workbuddy123', 'workbuddy1234', 'workbuddy2024',
+    'letmein12345', 'iloveyou1234', '111111111111', '000000000000',
+})
+
+
+def password_problem(pwd: str, username: str = '') -> str | None:
+    """返回密码不合规的原因；合规返回 None。
+
+    给 bootstrap（WB_ADMIN_PASSWORD）、新建用户、重置密码共用同一套判据，
+    避免「启动时能设弱口令、界面改密码时却被拦」这种不一致。
+    """
+    value = str(pwd or '')
+    if len(value) < MIN_PASSWORD_LENGTH:
+        return f'密码至少 {MIN_PASSWORD_LENGTH} 位'
+    low = value.lower()
+    if low in _WEAK_PASSWORDS:
+        return '密码过于常见，请换一个'
+    if username:
+        user = str(username).strip().lower()
+        if user and low.startswith(user) and low[len(user):].isdigit():
+            return '密码不能是用户名加数字'
+    if value.isdigit():
+        return '密码不能全是数字'
+    if len(set(value)) == 1:
+        return '密码不能是重复字符'
+    return None
+
+
+def weak_admin_passwords() -> list[str]:
+    """启动时检测**存量**管理员是否仍在用已知弱口令。
+
+    新密码在设置入口就被拦了，但升级上来的 users.json 里可能已经有
+    `admin123` 这类值（本次生产事故就是如此）。这里只拿小的静态黑名单去比对
+    哈希，命中就返回用户名，让启动日志能明确点出来；不直接拒绝启动——
+    否则用户会被锁在面板外，连改密码的入口都没有。
+    """
+    try:
+        cfg = load_users()
+    except Exception:  # noqa: BLE001
+        return []
+    found: list[str] = []
+    for item in cfg.get('users', []):
+        if item.get('role') != 'admin':
+            continue
+        stored = str(item.get('pwd_hash') or '')
+        for candidate in _WEAK_PASSWORDS:
+            if verify_pwd(candidate, stored):
+                found.append(str(item.get('username') or ''))
+                break
+    return found
+
+_DUMMY_HASH: str | None = None
+
+
+def dummy_verify(pwd: str) -> None:
+    """对一份固定的哑哈希完整跑一遍 PBKDF2，丢弃结果。
+
+    登录时用户不存在会短路跳过 PBKDF2（260000 轮，毫秒级时间差），响应快慢
+    因此暴露"用户名是否存在"——管理端默认必有 admin，价值有限，但公网服务
+    不该留这个侧信道。用户不存在的分支先跑一次本函数，把耗时对齐。
+    """
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = make_hash(secrets.token_urlsafe(24))
+    verify_pwd(pwd, _DUMMY_HASH)
 
 
 # ── 用户存储 ─────────────────────────────────────────────
@@ -134,7 +220,15 @@ def bootstrap_users() -> dict:
     import sys
 
     env_pwd = os.environ.get('WB_ADMIN_PASSWORD', '').strip()
-    pwd = env_pwd or secrets.token_urlsafe(9)
+    if env_pwd:
+        problem = password_problem(env_pwd, 'admin')
+        if problem:
+            raise RuntimeError(
+                f'WB_ADMIN_PASSWORD 不符合管理端密码策略：{problem}。'
+                f'请使用至少 {MIN_PASSWORD_LENGTH} 位、非常见弱口令的密码。'
+            )
+    # 随机密码也留足长度；token_urlsafe(12) 约 16 字符。
+    pwd = env_pwd or secrets.token_urlsafe(12)
     data = {
         'secret': config.new_secret(),
         'users': [{'username': 'admin', 'role': 'admin', 'pwd_hash': make_hash(pwd)}],
@@ -144,7 +238,7 @@ def bootstrap_users() -> dict:
     if not env_pwd:
         _write_initial_password_file(pwd)
         print('=' * 60, file=sys.stderr)
-        print('[WorkBuddy Manager] 已生成初始管理员账号', file=sys.stderr)
+        print('[Workbuddy Pro] 已生成初始管理员账号', file=sys.stderr)
         print(f'  用户名: admin', file=sys.stderr)
         print(f'  密码  : {pwd}', file=sys.stderr)
         print('  请登录后立即在「设置 → 管理用户」中修改密码。', file=sys.stderr)
@@ -288,6 +382,10 @@ def cookie_secure(request: Request) -> bool:
     """会话 cookie 是否带 `Secure` 标志。`WB_SECURE_COOKIE` = auto | true | false。
 
     `auto` 的判据是 `X-Forwarded-Proto`（反代终止 TLS 时由它告知原始协议）。
+    该头与 X-Real-IP 一样是普通请求头，只在 **TCP 对端是可信代理**时才采信
+    （与 `iputil.client_ip` 同一份判据）：直连的攻击者发
+    `X-Forwarded-Proto: http` 不能让 HTTPS 部署漏发 `Secure`。
+
     **这里有个隐蔽的失效形态**：反代没传该头时（1Panel / nginx 默认配置就未必传），
     后端只看到明文 HTTP，于是 `auto` 静默地不加 `Secure` —— 而用户访问的确实是
     HTTPS，他以为自己受保护。这类「以为安全其实没有」比明确的报错更危险，
@@ -298,7 +396,10 @@ def cookie_secure(request: Request) -> bool:
         return True
     if setting in ('false', '0'):
         return False
-    proto = request.headers.get('x-forwarded-proto', request.url.scheme)
+    proto = request.scope.get('scheme') or request.url.scheme
+    peer = request.client.host if request.client else ''
+    if config.TRUST_PROXY and _is_trusted_proxy(peer):
+        proto = request.headers.get('x-forwarded-proto', proto)
     return proto == 'https'
 
 
@@ -377,7 +478,14 @@ def login_blocked(ip: str, username: str | None = None) -> bool:
         key = username.lower()
         ucnt, ufirst = _user_fail.get(key, [0, 0.0])
         if ucnt >= MAX_FAILS and (now - ufirst) < LOCK_SECONDS:
-            return True
+            # 按用户名的锁定是为了防「换 IP 爆破同一账号」，但它同时给了匿名者
+            # 一件武器：对 admin 提交 5 次错误密码就能把**从未输错**的管理员
+            # 也锁在门外（远程锁定 DoS）。所以这里只拦**自己也失败过**的来源
+            # IP：爆破者每个 IP 都有失败记录，照样被拦；干净的管理员 IP 不受
+            # 牵连（它自己的输错次数仍由上面的按 IP 计数管着）。
+            icnt, ifirst = _fail.get(ip, [0, 0.0])
+            if icnt > 0 and (now - ifirst) < LOCK_SECONDS:
+                return True
     return False
 
 
@@ -438,13 +546,16 @@ def revoke_sessions(username: str) -> int:
     return new_sv
 
 
-def audit(actor: dict | None, action: str, target: str = '', detail: str = '') -> None:
+def audit(actor: dict | None, action: str, target: str = '', detail: str = '',
+          ip: str = '') -> None:
     """记录一条管理端审计日志。
 
     为什么必须做：本次事故中，攻击者改掉管理员密码、建了自己的账号，而**服务端
     没有留下任何痕迹**——只能靠反代 access log 去猜。管理端是公网入口，
     敏感操作（登录、改密码、增删用户、改安全配置）必须可追溯。
 
+    `ip` 是可选的结构化来源地址。历史调用把来源写进 detail（`来源 x.x.x.x`），
+    这里保留兼容；新调用应同时传 `ip`，方便按列筛选/告警，不必再解析文本。
     审计属于旁路，任何异常都不能影响请求本身（与请求日志同样的处理原则）。
     """
     try:
@@ -454,6 +565,7 @@ def audit(actor: dict | None, action: str, target: str = '', detail: str = '') -
             str(action),
             str(target or ''),
             str(detail or '')[:500],
+            str(ip or '')[:64],
         )
     except Exception:  # noqa: BLE001
         pass

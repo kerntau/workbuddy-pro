@@ -14,7 +14,8 @@
 2. **状态外置**：进度写入 JSON 文件，管理端读取该文件展示实时日志。
    （更新会重启管理端，若用 HTTP 流式返回会被中断）
 3. **幂等与安全**：上游更新会保留账号文件与配置；并**强制把端口绑定收敛为
-   127.0.0.1**，避免 upstream 仓库里的 `7863:7863` 覆盖我们的安全加固。
+   仅本机/容器网桥**，避免 upstream 仓库里的 `7863:7863` 覆盖我们的安全加固。
+   容器经 `host.docker.internal` 连上游时绑宿主网桥地址（issue #243）。
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ import re
 import shutil
 import signal
 import site
+import socket
 import stat
 import subprocess
 import sys
@@ -58,9 +60,19 @@ _force_utf8_stdio()
 
 
 # ── 运行环境（与 server/config.py 保持一致的默认值）──────────
-INSTALL_DIR = Path(os.environ.get('WB_INSTALL_DIR') or Path(__file__).resolve().parent.parent)
+def _default_install_dir() -> Path:
+    """本脚本可能位于 `deploy/` 或 `server/deploy/`（随 server 替换的那份）。"""
+    here = Path(__file__).resolve()
+    if here.parent.name == 'deploy' and here.parent.parent.name == 'server':
+        return here.parent.parent.parent
+    return here.parent.parent
+
+
+INSTALL_DIR = Path(os.environ.get('WB_INSTALL_DIR') or _default_install_dir())
 UPSTREAM_DIR = Path(os.environ.get('WB_UPSTREAM_DIR') or '/opt/workbuddy2api')
 UPSTREAM_PORT = int(os.environ.get('WB_UPSTREAM_PORT') or 7863)
+# 上游容器名（与上游 compose 的 container_name 一致；面板侧 WB2API_CONTAINER 同名）
+UPSTREAM_CONTAINER = os.environ.get('WB2API_CONTAINER') or 'workbuddy2api'
 MANAGER_PORT = int(os.environ.get('WB_MANAGER_PORT') or 7864)
 MANAGER_REPO = os.environ.get('WB_MANAGER_REPO') or 'kerntau/workbuddy-pro'
 
@@ -246,7 +258,6 @@ def is_mirrored(url: str) -> bool:
     return bool(GITHUB_MIRROR) and bool(url) and url.startswith(GITHUB_MIRROR)
 
 
-UPSTREAM_REPO = os.environ.get('WB_UPSTREAM_REPO') or 'https://github.com/Sliverkiss/workbuddy2api.git'
 SERVICE_NAME = os.environ.get('WB_SERVICE_NAME') or 'workbuddy-web'
 DATA_DIR = Path(os.environ.get('WB_DATA_DIR') or INSTALL_DIR / 'data')
 STATUS_FILE = Path(os.environ.get('WB_UPDATE_STATUS') or DATA_DIR / 'update-status.json')
@@ -257,10 +268,6 @@ STATUS_FILE = Path(os.environ.get('WB_UPDATE_STATUS') or DATA_DIR / 'update-stat
 # 自己，这是 Docker 的模型决定的，不是缺功能。
 # 取 auto：能探测到容器就按容器处理，否则按 systemd。
 RUN_MODE = (os.environ.get('WB_RUN_MODE') or 'auto').strip().lower()
-# 上游版本固定：写入提交号/标签后，上游更新会检出该版本而不是跟随分支。
-# 用途：上游某个提交自身有问题（如 Dockerfile 引用了已删除的文件）时，
-# 可以固定回上一个可用提交，避免「一更就坏、且没有退路」。
-UPSTREAM_REF_FILE = Path(os.environ.get('WB_UPSTREAM_REF_FILE') or DATA_DIR / 'upstream-ref.txt')
 
 STEP_TIMEOUT = int(os.environ.get('WB_UPDATE_STEP_TIMEOUT') or 900)
 
@@ -573,20 +580,63 @@ def _compose_wide_bind() -> str:
     return f'"{UPSTREAM_PORT}:{UPSTREAM_PORT}"'
 
 
-def _compose_bound_bind() -> str:
-    return f'"127.0.0.1:{UPSTREAM_PORT}:{UPSTREAM_PORT}"'
+def _upstream_bind_host() -> str:
+    """宿主机上发布上游端口时使用的地址（issue #243）。
+
+    默认 `127.0.0.1`（仅本机）。但管理端跑在容器里、通过
+    `WB2API_BASE=http://host.docker.internal:7863` 连上游时，宿主机回环对
+    容器**不可达**（Linux 上尤其明确）；把端口收敛到 127.0.0.1 会让更新后
+    面板一直提示「上游不可用」。
+
+    这种部署下改为绑定 `host.docker.internal` 解析出的宿主机网桥地址
+    （如 172.17.0.1 / 172.18.0.1）：容器可达，且不是公网地址。
+    Docker Desktop 的 192.168.65.0/24 是虚拟机内部地址，宿主并不拥有，
+    仍用 127.0.0.1（Desktop 会把它转发给宿主回环）。
+
+    `WB_UPSTREAM_BIND` 可显式覆盖（如只绑内网网卡 `192.168.1.10`）。
+    """
+    explicit = (os.environ.get('WB_UPSTREAM_BIND') or '').strip()
+    if explicit:
+        return explicit
+    base = (os.environ.get('WB2API_BASE') or '').strip()
+    if not base:
+        return '127.0.0.1'
+    try:
+        parts = urllib.parse.urlsplit(base if '//' in base else f'http://{base}')
+        host = (parts.hostname or '').lower()
+    except ValueError:
+        return '127.0.0.1'
+    if host != 'host.docker.internal':
+        return '127.0.0.1'
+    try:
+        ip = socket.gethostbyname(host)
+    except OSError:
+        return '127.0.0.1'
+    if not ip or ip.startswith('127.') or ip.startswith('192.168.65.'):
+        return '127.0.0.1'
+    return ip
+
+
+def _compose_bound_bind(host: str | None = None) -> str:
+    return f'"{host or _upstream_bind_host()}:{UPSTREAM_PORT}:{UPSTREAM_PORT}"'
 
 
 def _port_converged(text: str) -> str:
-    """把 compose 文本里的公网端口绑定收敛为仅本机（纯文本替换，不落盘）。"""
-    return text.replace(_compose_wide_bind(), _compose_bound_bind())
+    """把 compose 文本里的公网端口绑定收敛为仅本机/容器网桥（纯文本替换）。"""
+    new = _compose_bound_bind()
+    for old in (_compose_wide_bind(),
+                f'"0.0.0.0:{UPSTREAM_PORT}:{UPSTREAM_PORT}"',
+                f'"127.0.0.1:{UPSTREAM_PORT}:{UPSTREAM_PORT}"'):
+        text = text.replace(old, new)
+    return text
 
 
 def enforce_local_bind(rep: Reporter) -> None:
-    """把 compose 的端口绑定收敛为仅本机。
+    """把 compose 的端口绑定收敛到安全地址。
 
-    upstream 仓库里是 `7863:7863`（公网可达）；我们的安全基线要求
-    `127.0.0.1:7863:7863`。每次更新后都要重新施加，否则会悄悄回退。
+    upstream 仓库里是 `7863:7863`（公网可达）；我们的基线要求只绑本机。
+    容器经 host.docker.internal 访问时，绑宿主网桥地址（issue #243），
+    否则容器连不上；每次更新后都要重新施加，否则会悄悄回退。
     """
     compose = UPSTREAM_DIR / 'docker-compose.yml'
     if not compose.is_file():
@@ -595,39 +645,15 @@ def enforce_local_bind(rep: Reporter) -> None:
     text = compose.read_text(encoding='utf-8')
     bound = _compose_bound_bind()
     if bound in text:
-        rep.log('端口绑定已是仅本机（127.0.0.1）')
+        rep.log(f'端口绑定已是 {_upstream_bind_host()}（安全基线）')
         return
-    if _compose_wide_bind() in text:
+    if any(old in text for old in (_compose_wide_bind(),
+                                   f'"0.0.0.0:{UPSTREAM_PORT}:{UPSTREAM_PORT}"',
+                                   f'"127.0.0.1:{UPSTREAM_PORT}:{UPSTREAM_PORT}"')):
         compose.write_text(_port_converged(text), encoding='utf-8')
         rep.log(f'已将端口绑定收敛为 {bound}（安全基线）')
     else:
         rep.log('未匹配到端口绑定行，请人工确认 compose 配置', 'warn')
-
-
-def _compose_looks_customized(rep: Reporter) -> bool:
-    """compose 文件里是否存在**除我们端口收敛之外**的用户改动。
-
-    判据：把本地文件反向还原端口收敛后，与 git HEAD 里的版本比对——
-    不相同就说明用户自己改过（加网络、改卷、加环境变量…）。
-
-    为什么要单独判断：端口收敛是我们**故意**制造的本地改动，每次更新都会
-    重新施加，不该被当成「用户定制」而一直保留旧文件。只有真正的用户定制
-    才需要保住（issue #28：1Panel 用户加了 external 网络，被 git reset 抹掉后
-    容器重建连不上网络）。
-    """
-    compose = UPSTREAM_DIR / 'docker-compose.yml'
-    if not compose.is_file():
-        return False
-    try:
-        local = compose.read_text(encoding='utf-8')
-        rc, head = run(['git', 'show', 'HEAD:docker-compose.yml'],
-                       cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            return False  # 取不到 HEAD 版本就不下结论，按「没定制」处理（维持旧行为）
-        # 两边都归一化到「收敛后」再比，排除掉端口这一处已知差异
-        return _port_converged(local).strip() != _port_converged(head).strip()
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def _normalize_eol(raw: bytes) -> bytes:
@@ -660,14 +686,13 @@ def _sync_bundled_upstream(src: Path, rep: Reporter) -> int:
     返回**改动文件数**（改写的 + 新增的）；0 表示没变或本次不适用——
     调用方据此决定要不要重建上游容器（源码没变就不该白等一次构建）。
 
-    上游仓库的公开地址已不可用，源码随面板的 Release 包分发（包内 `upstream/`）。
-    在这里同步而不是在 `update_upstream` 里另下载一份，是因为**包是验过签的**：
-    上游代码由此与面板走同一条下载与校验路径；而 `update_upstream` 的 git 拉取
-    没有这层保证（也正因为上游仓库已不可访问，包里这份才是可靠来源）。
+    上游源码由本项目维护，随管理端 Release 分发（包内 `upstream/`）。在这里
+    同步而不是另拉一个仓库，是因为**包是验过签的**：上游代码与面板走同一条
+    下载与校验路径，不存在第二个更新源。
 
     三条克制：
-      · 只处理**非 git** 的上游目录 —— git 部署有自己的通道（拉远端），那份源码
-        可能比包内的新，拿包内的覆盖它是倒退；
+      · git 目录也同步：外部上游已停止维护，本地 git 历史不再作为更新来源；
+        仍保留 `config.json` / `auths/` / `data/` 和用户自定义的 compose；
       · 顶层 `config.json` / `auths/` / `data/` 一律不动（api_key、账号凭据、运行数据）；
       · 只增改、不删除：包里没有的文件保留原地（宁可留旧文件，也不误删用户的）。
     """
@@ -675,13 +700,12 @@ def _sync_bundled_upstream(src: Path, rep: Reporter) -> int:
     if not incoming.is_file():
         rep.log('本次包内未含上游源码（upstream/），跳过上游代码同步')
         return 0
+    UPSTREAM_DIR.mkdir(parents=True, exist_ok=True)
     if not (UPSTREAM_DIR / 'docker-compose.yml').is_file():
-        rep.log(f'{UPSTREAM_DIR} 里还没有上游源码，跳过同步'
-                '（首次安装上游请用 deploy/install.sh，它会用包内的 upstream/）', 'warn')
-        return 0
+        rep.log(f'{UPSTREAM_DIR} 里还没有上游源码，按发布包完整写入')
     if (UPSTREAM_DIR / '.git').is_dir():
-        rep.log('上游是 git 部署：由上面的 git 流程更新，不覆盖包内源码')
-        return 0
+        rep.log('检测到上游目录是 git 部署：外部仓库已停更，本次按发布包内源码同步；'
+                '本地 git 历史不再作为更新来源', 'warn')
 
     # 用户对 compose 的定制（加网络 / 改卷 / 改端口之外的东西）要保住。
     # 没有 git 可比，就拿「包内那份」当基准：两边都归一化掉我们的端口收敛，
@@ -731,6 +755,26 @@ def _sync_bundled_upstream(src: Path, rep: Reporter) -> int:
 
     if keep_compose is not None:
         local_compose.write_text(keep_compose, encoding='utf-8')
+    # 标记文件是面板判断「本机上游是否已同步」的唯一依据。它没写进去时，
+    # 上面所有文件都可能已经同步成功，但界面仍会一直提示不一致（issue #240
+    # 的现场就是这类：目录不是持久化挂载，或写权限不足）。这里把它单独验一遍。
+    src_id = src / '.upstream-id'
+    if src_id.is_file():
+        try:
+            want = src_id.read_text(encoding='utf-8').strip()
+            got = (UPSTREAM_DIR / '.upstream-id').read_text(encoding='utf-8').strip() \
+                if (UPSTREAM_DIR / '.upstream-id').is_file() else ''
+            if want and got != want:
+                rep.log(
+                    f'上游标识未能更新：{UPSTREAM_DIR}/.upstream-id '
+                    f'仍是 {got[:8] or "缺失"}，应为 {want[:8]}。'
+                    '请确认该目录已从宿主机挂载且容器用户可写；'
+                    '否则面板会一直提示「随包上游与本机不一致」。',
+                    'error')
+            else:
+                rep.log(f'上游标识已同步：{want[:8]}')
+        except OSError as exc:
+            rep.log(f'核对上游标识失败：{exc}', 'warn')
     if changed or added:
         rep.log(f'上游源码已随包更新：改写 {changed} 个、新增 {added} 个文件')
     else:
@@ -738,159 +782,25 @@ def _sync_bundled_upstream(src: Path, rep: Reporter) -> int:
     return changed + added
 
 
-def _fetch_failed_hint(out: str, pinned: str = '') -> str:
-    """拉取上游失败时给用户的话——分清「远端没了」与「网络/引用有问题」。
-
-    上游原仓库（Sliverkiss/workbuddy2api）自 2026-09-23 起已不可访问。
-    git 在这种情况下的报错是 `Repository not found` / `could not read from remote`，
-    直接透出去容易被当成网络抖动，用户会反复重试同一个必然失败的地址。
-    """
-    low = (out or '').lower()
-    # 注意别写成「repo**sitory** not found」这种连在一起的写法：git 的原文是
-    # `repository 'https://…' not found`，中间夹着地址，连写匹配不上（头一版就栽在这）。
-    gone = (re.search(r'repository .*not found', low) is not None
-            or 'does not appear to be a git repository' in low
-            or 'could not read from remote repository' in low)
-    target = f'上游 {pinned}' if pinned else '上游'
-    if gone:
-        return (f'{target}的远端仓库取不到代码（发布包分发的那份不受影响）。\n'
-                '  本次沿用现有源码继续。要更新上游代码：管理端一键更新会带上包内那份；\n'
-                '  也可以把 WB_UPSTREAM_REPO 指向你自己的副本，或用 UPSTREAM_SRC 换一份源码\n'
-                '  （见 deploy/README.md 的「上游源码从哪来」）。')
-    return (f'{target}拉取失败（提交/标签是否存在？网络是否正常？）'
-            + (f'：{out.strip()[:200]}' if out.strip() else ''))
-
-
 def update_upstream(rep: Reporter) -> None:
-    rep.step('更新上游 workbuddy2api')
+    """同步发布包内自带的上游源码，并在有变化时重建容器。
 
-    if not (UPSTREAM_DIR / '.git').is_dir():
-        # 随包分发的上游：源码就在发布包里（原仓库已不可用），所以这条路径**也要取包**
-        # —— 与 update_manager 共用同一次下载与解压，`--target both` 不会下两遍。
-        #
-        # 早先这里直接 return，于是「全部更新」在管理端已是最新时什么都不做：包里带着
-        # 更新的上游源码，却同步不进去（管理端那条路径在版本相同时先短路返回了）。
-        new_root, _info = _release_root(rep)
-        changed = _sync_bundled_upstream(new_root / 'upstream', rep)
-        if changed:
-            # 包内那份 compose 是**上游原样**（`7863:7863`，公网可达），同步会盖掉
-            # 端口收敛，所以这里必须**重新施加**安全基线，否则上游会重新暴露到 0.0.0.0。
-            enforce_local_bind(rep)
-            rep.log('上游源码有变化，重建容器使其生效…')
-            rebuild_upstream(rep)
-        else:
-            rep.log('上游源码与包内一致，无需重建')
-        return
+    上游已由本项目维护，没有独立的远端仓库/分支；无论本地目录是不是 git
+    部署，包内 `upstream/` 都是唯一更新源。管理端与上游共用同一次下载与
+    解压（`--target both` 不会下两遍）。
+    """
+    rep.step('同步随包上游')
 
-    which = shutil.which('git')
-    if not which:
-        raise RuntimeError('未安装 git，无法更新上游')
-
-    # 1) 若存在本地改动，先备份再暂存，避免 pull 冲突
-    rc, status = run(['git', 'status', '--porcelain'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-    dirty = [l for l in status.splitlines() if l.strip()]
-    # compose 的用户定制要**单独留存**：更新会用 git reset --hard 抹掉工作区，
-    # 而 patch 备份（下面那个 .patch 文件）只是给人看的，不会自动还原。
-    # 见 issue #28：1Panel 用户给上游 compose 加了 external 网络，
-    # 更新后被抹掉 → 容器重建时网络配置丢失、连不上。
-    custom_compose = _compose_looks_customized(rep)
-    saved_compose = ''
-    if custom_compose:
-        try:
-            saved_compose = (UPSTREAM_DIR / 'docker-compose.yml').read_text(encoding='utf-8')
-            rep.log('检测到 docker-compose.yml 有本地定制，更新后会原样恢复'
-                    '（网络 / 卷 / 端口等配置不会丢）')
-        except OSError as exc:
-            rep.log(f'读取本地 docker-compose.yml 失败，无法保留定制：{exc}', 'warn')
-            custom_compose = False
-    if dirty:
-        rep.log(f'检测到 {len(dirty)} 处本地改动，先备份')
-        backup = DATA_DIR / 'upstream-local-changes.patch'
-        rc, diff = run(['git', 'diff'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if diff.strip():
-            backup.write_text(diff, encoding='utf-8')
-            rep.log(f'  已备份到 {backup}')
-        # 丢弃本地改动：其中包含我们的端口收敛与（已单独留存的）compose 定制，
-        # 前者稍后重新施加，后者在更新完成后原样写回
-        run(['git', 'checkout', '--', '.'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-
-    # 2) 拉取（或检出被固定的版本）
-    pinned = _read_upstream_ref()
-    before = ''
-    rc, out = run(['git', 'rev-parse', 'HEAD'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-    if rc == 0:
-        before = out.strip()[:8]
-
-    if pinned:
-        rep.log(f'已固定上游版本：{pinned}（不跟随分支）')
-        rc, out = run(['git', 'fetch', '--depth', '1', 'origin', pinned],
-                      cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            # 浅克隆有时取不到任意提交，退回完整 fetch 再试
-            rep.log('按提交直接拉取失败，尝试完整拉取…', 'warn')
-            rc, out = run(['git', 'fetch', 'origin'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            raise RuntimeError(_fetch_failed_hint(out, pinned))
-        rc, out = run(['git', 'reset', '--hard', 'FETCH_HEAD'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            rc, out = run(['git', 'reset', '--hard', pinned], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            raise RuntimeError(f'检出上游 {pinned} 失败')
+    new_root, _info = _release_root(rep)
+    changed = _sync_bundled_upstream(new_root / 'upstream', rep)
+    if changed:
+        # 包内那份 compose 是**上游原样**（`7863:7863`，公网可达），同步会盖掉
+        # 端口收敛，所以这里必须**重新施加**安全基线，否则上游会重新暴露到 0.0.0.0。
+        enforce_local_bind(rep)
+        rep.log('上游源码有变化，重建容器使其生效…')
+        rebuild_upstream(rep)
     else:
-        rep.log('拉取上游最新代码…')
-        rc, out = run(['git', 'fetch', '--depth', '1', 'origin'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            # 拉不到不致命：下面会沿用现有代码继续重建容器（本地源码是好的）。
-            # 但**原因要如实说**——原先一律写「网络问题？」，而上游原仓库
-            # 2026-09-23 起不再可用，用户照那句话去查网络只会白费功夫。
-            rep.log(_fetch_failed_hint(out), 'warn')
-        branch = 'master'
-        rc, out = run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        cur = out.strip() if rc == 0 else ''
-        if rc == 0 and cur and cur != 'HEAD':
-            branch = cur
-        else:
-            # 之前固定过版本会处于游离 HEAD，先切回分支再 pull
-            run(['git', 'checkout', '-f', branch], cwd=UPSTREAM_DIR, rep=rep, check=False)
-
-        rc, out = run(['git', 'pull', '--ff-only', 'origin', branch], cwd=UPSTREAM_DIR, rep=rep, check=False)
-        if rc != 0:
-            rep.log('fast-forward 失败，尝试硬重置到远端（本地改动已备份）', 'warn')
-            run(['git', 'reset', '--hard', f'origin/{branch}'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-
-    after = ''
-    rc, out = run(['git', 'rev-parse', 'HEAD'], cwd=UPSTREAM_DIR, rep=rep, check=False)
-    if rc == 0:
-        after = out.strip()[:8]
-    if before and after and before == after:
-        rep.log(f'上游已是最新（{after}）')
-    else:
-        rep.log(f'上游代码更新：{before or "?"} → {after or "?"}')
-
-    # 3) 恢复用户对 compose 的本地定制（issue #28）
-    #
-    # 必须在 enforce_local_bind **之前**：那份定制里可能也有端口行，
-    # 先恢复再统一收敛，才不会漏掉它。
-    if custom_compose and saved_compose:
-        try:
-            (UPSTREAM_DIR / 'docker-compose.yml').write_text(saved_compose, encoding='utf-8')
-            rep.log('已恢复本地定制的 docker-compose.yml')
-        except OSError as exc:
-            rep.log(f'恢复 docker-compose.yml 失败：{exc}', 'warn')
-            rep.log('  你的定制仍保存在本次更新的备份 patch 里，可手动恢复', 'warn')
-
-    # 4) 恢复安全基线
-    enforce_local_bind(rep)
-
-    # 5) 预检 + 重建 + 等待就绪（见 rebuild_upstream）
-    rebuild_upstream(rep)
-
-    # 6) 清版本检测缓存
-    #
-    # 缓存里存的是「更新前」查到的远端最新提交；不清的话，界面会把**已经装好的
-    # 这个版本**当成新版本继续提示「上游有更新」，一直到缓存 6 小时过期为止
-    # （用户报过这个问题：明明更新到最新了，面板还是一直说有更新）。
-    # 管理端更新那条路径早就清了，上游这条一直漏着。
+        rep.log('上游源码与包内一致，无需重建')
     _clear_version_cache(rep)
 
 
@@ -915,7 +825,7 @@ def rebuild_upstream(rep: Reporter) -> None:
         for m in missing:
             rep.log(f'  缺少 {m}', 'error')
         rep.log('这是上游代码本身的问题（不是你配置的问题）。'
-                '可在「设置 → 系统更新」把上游固定到上一个可用提交，或等待上游修复。', 'error')
+                '可用上一版管理端发布包重装回退，或等维护者修复后发布新版。', 'error')
         raise RuntimeError('上游 Dockerfile 引用了不存在的文件：' + ', '.join(missing))
 
     # 6) 重建并启动
@@ -932,7 +842,21 @@ def rebuild_upstream(rep: Reporter) -> None:
             '  宿主机部署请安装 docker compose 插件或 docker-compose。\n'
             '  自查：容器内执行 `docker compose version` 与 `ls /usr/local/lib/docker/cli-plugins/`。'
         )
-    rc, out = run(compose_cmd + ['up', '-d', '--build'], cwd=UPSTREAM_DIR, rep=rep, check=False)
+    # 重建前确认账号目录有持久化来源（issue #400）：没有挂载时 force-recreate 会把
+    # 容器层里的 auths 一起删掉，账号全部丢失（面板 data 还在，能登录但没号）。
+    auths_ok = _auths_persisted()
+    if auths_ok is False:
+        rep.log('上游容器的 auths 没有挂载到宿主机或命名卷：重建会丢失全部账号，'
+                '已跳过本次上游重建。请先在 docker-compose.yml 的上游服务里挂载 '
+                './auths:/app/auths（或把整个上游目录挂到 /opt/workbuddy2api），'
+                '再重新执行更新。当前容器与账号保持不变。', 'error')
+        return
+    # `--force-recreate` 不是可选项（issue #334）：只改源码时 compose 判定
+    # 「配置没变」，可能直接打出 `Container workbuddy2api  Running` 而**不换容器**。
+    # 于是构建出来的新镜像躺在一边，跑着的还是旧代码：界面继续提示「随包上游与
+    # 本机不一致」、上游的行为也没变，而日志里看起来每一步都成功了。
+    before_container = _container_id(UPSTREAM_CONTAINER)
+    rc, out = run(compose_cmd + ['up', '-d', '--build', '--force-recreate'], cwd=UPSTREAM_DIR, rep=rep, check=False)
     if rc != 0:
         hint = _diagnose_build_failure(out)
         rep.log(f'重建失败（exit {rc}）', 'error')
@@ -951,6 +875,13 @@ def rebuild_upstream(rep: Reporter) -> None:
         _report_service_state(rep)
         raise RuntimeError('上游重建失败' + (f'：{hint}' if hint else '，请查看上方日志'))
 
+    # 核对容器确实换了（issue #334）：compose 返回 0 却沿用旧容器时，后面的每一步
+    # 都会「成功」，唯一的症状就是界面上那句「随包上游与本机不一致」消不掉。
+    after_container = _container_id(UPSTREAM_CONTAINER)
+    if before_container and after_container and before_container == after_container:
+        rep.log(f'警告：容器 {UPSTREAM_CONTAINER} 的 ID 未变化（{after_container[:12]}），'
+                '可能仍在跑旧代码。请手动执行 '
+                'docker compose up -d --build --force-recreate。', 'warn')
     # 6) 等待就绪（地址按部署形态取：容器里不是回环，见 upstream_health_url）
     wait_upstream_ready(rep)
 
@@ -1082,17 +1013,6 @@ def _sync_deploy(new_deploy: Path, install_dir: Path, backup: Path,
     return added, modified
 
 
-def _read_upstream_ref() -> str:
-    """要固定的上游版本（提交号/标签）。环境变量优先，其次本地文件；空 = 跟随分支。"""
-    env = (os.environ.get('WB_UPSTREAM_REF') or '').strip()
-    if env:
-        return env
-    try:
-        return UPSTREAM_REF_FILE.read_text(encoding='utf-8').strip()
-    except Exception:  # noqa: BLE001
-        return ''
-
-
 def _missing_copy_sources() -> list[str]:
     """列出 Dockerfile 里 COPY 引用了、但仓库中并不存在的本地文件。
 
@@ -1182,7 +1102,7 @@ def _diagnose_build_failure(out: str) -> str:
     low = (out or '').lower()
     if 'not found' in low and ('checksum' in low or 'copy' in low):
         return ('上游 Dockerfile 引用了仓库里不存在的文件——这是上游代码的问题，'
-                '不是你配置的问题。可把它固定到上一个可用提交后重试')
+                '不是你配置的问题。可回滚到上一版管理端发布包后重试')
     if 'no space left' in low:
         return '磁盘空间不足，请清理后重试'
     if any(k in low for k in ('dial tcp', 'i/o timeout', 'temporary failure', 'connection refused')):
@@ -1202,6 +1122,63 @@ def _health_ok(url: str, timeout: int = 3) -> bool:
             return resp.status == 200
     except Exception:  # noqa: BLE001
         return False
+
+
+def _auths_persisted() -> bool | None:
+    """上游容器的 auths 是否有持久化来源（挂载/卷）。
+
+    True = 有；False = 明确没有；None = 容器不存在或读不到（不据此拦截）。
+
+    为什么要有这道闸（issue #400）：`compose up --force-recreate` 会删掉旧容器。
+    如果部署方没给上游的 auths 挂卷/绑定目录，账号文件只存在容器层里，重建后
+    全部消失——面板还能登录（data 卷在），但账号列表空了。这里在重建前检查
+    inspect 的 Mounts；明确没挂时**跳过重建**并给出修法，保住现有容器与账号。
+    """
+    try:
+        proc = subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .Mounts}}', UPSTREAM_CONTAINER],
+            capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        mounts = json.loads(proc.stdout or '[]')
+    except ValueError:
+        return None
+    if not isinstance(mounts, list):
+        return None
+    destinations = []
+    for item in mounts:
+        if isinstance(item, dict):
+            destinations.append(str(item.get('Destination') or '').rstrip('/'))
+    if not destinations:
+        return False
+    for dest in destinations:
+        # 上游 compose 默认 ./auths:/app/auths；本项目的整目录挂载是 /opt/workbuddy2api。
+        if (dest == '/app/auths' or dest == '/app'
+                or dest == '/opt/workbuddy2api'
+                or dest.startswith('/opt/workbuddy2api/')):
+            return True
+    return False
+
+
+def _container_id(name: str) -> str:
+    """容器 ID（取不到返回空串）。
+
+    用来核对「重建之后跑的还是不是同一个容器」（issue #334）。只是尽力而为：
+    docker 不可用或容器不存在时返回空，调用方据此跳过核对 —— 不能因为读不到
+    ID 就把一次成功的更新报成失败。
+    """
+    try:
+        proc = subprocess.run(
+            ['docker', 'inspect', '--format', '{{.Id}}', name],
+            capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001
+        return ''
+    if proc.returncode != 0:
+        return ''
+    return (proc.stdout or '').strip()
 
 
 def _report_service_state(rep: Reporter) -> None:
@@ -1400,6 +1377,33 @@ def fetch_release_via_redirect(latest_url: str | None = None,
     }
 
 
+def _in_venv() -> bool:
+    """当前解释器是否跑在虚拟环境里（issue #382）。
+
+    venv 的 pip 明确拒绝 `--user`（"User site-packages are not visible in this
+    virtualenv"），所以这条判定必须在决定传不传 `--user` 之前做。用
+    `sys.prefix != sys.base_prefix` 而不是看路径里有没有 `venv/`：后者会被
+    任意目录名骗过。
+    """
+    return sys.prefix != getattr(sys, 'base_prefix', sys.prefix)
+
+
+def _venv_purelib_writable() -> tuple[bool, str]:
+    """venv 的 site-packages 是否可写；返回 (可写, 路径)。
+
+    venv 内不能退回 --user，只能装进自己；不可写时要在调用 pip **之前**报出
+    具体路径，而不是让 pip 连着失败两次再给一句「依赖安装失败」。
+    """
+    try:
+        purelib = sysconfig.get_path('purelib') or ''
+    except Exception:  # noqa: BLE001
+        purelib = ''
+    if not purelib:
+        return False, ''
+    p = Path(purelib)
+    return (p.is_dir() and os.access(p, os.W_OK) and os.access(p.parent, os.W_OK)), purelib
+
+
 def _system_site_writable() -> bool:
     """系统 site-packages 能不能直接写。
 
@@ -1436,13 +1440,29 @@ def install_requirements(req: Path, rep: Reporter) -> None:
     这个部署**永远升不上去**（issue #157 的另一半——#160 只做到"失败要响"）。
     """
     py = sys.executable
-    use_user = not _system_site_writable()
-    target = ['--user'] if use_user else []
+    in_venv = _in_venv()
+    if in_venv:
+        # venv 内 pip 不接受 --user（issue #382）：只能装进本环境。目标目录不可写
+        # 时提前给出路径与修复建议，别让 pip 连着失败两次再报一句笼统错误。
+        writable, purelib = _venv_purelib_writable()
+        if not writable:
+            raise RuntimeError(
+                '当前 Python 是虚拟环境（' + sys.prefix + '），但依赖目录不可写：'
+                + (purelib or '路径未知')
+                + '。请修复该目录的写权限，或重建虚拟环境后重试；'
+                  '本次更新已中止，当前版本保持不变。')
+        use_user = False
+        target: list[str] = []
+        attempts = [target]
+        rep.log(f'检测到虚拟环境（{sys.prefix}），依赖安装到该环境的 site-packages')
+    else:
+        use_user = not _system_site_writable()
+        target = ['--user'] if use_user else []
+        # 系统 Python 保留 PEP 668 的两段尝试（带 / 不带 --break-system-packages）。
+        attempts = [target + ['--break-system-packages'], target]
+        if use_user:
+            rep.log(f'系统 site-packages 不可写，依赖改装到用户站点（{site.getusersitepackages()}）')
     rep.log('检查 / 安装 Python 依赖…')
-    if use_user:
-        rep.log(f'系统 site-packages 不可写，依赖改装到用户站点（{site.getusersitepackages()}）')
-
-    attempts = [target + ['--break-system-packages'], target]
     code, out = 0, ''
     for extra in attempts:
         code, out = run([py, '-m', 'pip', 'install', '-q', *extra, '-r', str(req)],
@@ -1452,7 +1472,8 @@ def install_requirements(req: Path, rep: Reporter) -> None:
 
     # 可写性判定可能误判（ACL、只读挂载…）：只在输出看起来是权限问题时补一次 --user，
     # 免得给真正的网络/解析失败也套上 --user 掩盖原因。
-    if not use_user and any(h in (out or '').lower() for h in _PERMISSION_HINTS):
+    # venv 里没有 --user 这条退路：权限问题只能报错（上面已预检过目录）。
+    if not in_venv and not use_user and any(h in (out or '').lower() for h in _PERMISSION_HINTS):
         code, _ = run([py, '-m', 'pip', 'install', '-q', '--user',
                        '--break-system-packages', '-r', str(req)], rep=rep, check=False)
         if code == 0:
@@ -1872,8 +1893,17 @@ def restart_service(rep: Reporter) -> None:
         return
     rc, _ = run(['systemctl', 'restart', SERVICE_NAME], rep=rep, check=False)
     if rc != 0:
-        raise RuntimeError(f'重启服务失败（systemctl 返回 {rc}），请手动执行 systemctl status {SERVICE_NAME}')
+        # 服务降权为专用账号后，没有 polkit 授权的机器上会走到这里：
+        # 新代码已落盘，只差重启这一步，所以提示必须给出可直接照做的命令。
+        raise RuntimeError(
+            f'重启服务失败（systemctl 返回 {rc}）。新代码已就位，'
+            f'请在服务器上手动执行：systemctl restart {SERVICE_NAME}')
     rep.log('服务已重启')
+
+
+# 等待 PID 1 退出的上限。uvicorn 的 --timeout-graceful-shutdown 设为 20 秒，
+# 比它再留一点余量；超时后强杀并提示手动重启。
+_GRACEFUL_EXIT_SECONDS = 30
 
 
 def _exit_for_restart(rep: Reporter) -> None:
@@ -1889,13 +1919,40 @@ def _exit_for_restart(rep: Reporter) -> None:
     """
     try:
         os.kill(1, signal.SIGTERM)
-        rep.log('已向主进程发送终止信号，容器即将在新代码下重启')
+        rep.log('已向主进程发送终止信号，等待容器用新代码重启')
     except Exception as exc:  # noqa: BLE001
         rep.log(f'发送终止信号失败（{exc}）—— 请手动重启容器：'
                 'docker compose restart workbuddy-manager', 'warn')
         return
-    # 给接收方一点时间优雅退出；随后本进程也退出（容器本该随之结束）
-    time.sleep(2)
+    # 必须**等 PID 1 真的退出**再结束本进程（issue #398）。旧实现固定 sleep 2 秒就
+    # 走人：uvicorn 没有优雅退出超时（Dockerfile 的 --timeout-graceful-shutdown）时
+    # 会一直等连接关闭，容器既不退出也不重启 —— 用户看到的就是更新后卡死 502。
+    deadline = time.time() + _GRACEFUL_EXIT_SECONDS
+    while time.time() < deadline:
+        if not _pid1_alive():
+            rep.log('主进程已退出，容器将按 restart 策略用新代码拉起')
+            return
+        time.sleep(0.5)
+    rep.log(f'主进程在 {_GRACEFUL_EXIT_SECONDS} 秒内未退出，发送 SIGKILL；'
+            '若容器仍未重启，请手动执行 docker compose restart workbuddy-manager', 'warn')
+    try:
+        # Windows 没有 SIGKILL（容器场景不会走到这里，但导入/测试要能跑）。
+        os.kill(1, getattr(signal, 'SIGKILL', signal.SIGTERM))
+    except Exception as exc:  # noqa: BLE001
+        rep.log(f'强制结束主进程失败（{exc}）', 'warn')
+
+
+def _pid1_alive() -> bool:
+    """容器主进程是否还活着；没有权限探测时按「活着」处理（宁可等/强杀，不误判）。"""
+    try:
+        os.kill(1, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def read_local_version() -> str:

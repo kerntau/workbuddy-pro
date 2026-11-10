@@ -57,13 +57,13 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=${TAG#v}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ steps.vars.outputs.tag }}
           fetch-depth: 0
 
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # 22 起才有 ESM 的 TypeScript type stripping：几处「借 Node 直接跑真实 .ts
           # 实现」的用例（async-state / display-prefs 等）在 20 上会自我 skip —— 也就是
@@ -102,6 +102,11 @@ jobs:
           cp -r server "$STAGE/"
           mkdir -p "$STAGE/web" && cp -r web/out "$STAGE/web/"
           cp -r deploy "$STAGE/"
+          # 更新器再放一份到 server/：一键更新必然整体替换 server/，而旧版
+          # 更新器可能不替换根目录 deploy/。放在 server/ 后，面板重启就能用
+          # 新版更新器，不必先「更新一次才会更新更新器」（issue #240）。
+          mkdir -p "$STAGE/server/deploy"
+          cp deploy/update.py "$STAGE/server/deploy/update.py"
           # ── 用户文档（白名单）────────────────────────────────────────
           # 只把**用户看得懂的文档**放进发布包：维护者手册（发布流程 / i18n /
           # 命名兼容 / 上游修复记录 / 提案 / 设计方案）留在仓库里做开发参考，
@@ -111,7 +116,7 @@ jobs:
           # server/tests/test_docs_packaging.py 双向守着（README 链到的必须
           # 在名单里；名单里不许有 README 链不到的）。
           # docs-pack:begin
-          DOCS_LIST="usage.md features.md screenshots.md development.md security-notes.md api-tokens.md account-proxy-routes.md SECURITY-AUDIT.md release-signing.md"
+          DOCS_LIST="usage.md features.md screenshots.md development.md security-notes.md api-tokens.md account-proxy-routes.md SECURITY-AUDIT.md release-signing.md watchdog.md qq-bot.md"
           mkdir -p "$STAGE/docs"
           for f in $DOCS_LIST; do
             cp "docs/$f" "$STAGE/docs/" || { echo "::error::发布包缺少用户文档 docs/$f"; exit 1; }
@@ -140,8 +145,8 @@ jobs:
           # 标为 pre-release 以免影响 releases/latest）取回来塞进包里：
           #   · 新装：install.sh 见到 upstream/ 直接用（离线可装）
           #   · 升级：update.py 把它同步进上游目录（保留 config/auths/data）
-          # 取不到**不致命**（网络抖动、载体未建）：记一条醒目日志继续打包，
-          # 用户仍可用 UPSTREAM_SRC 自己指定源码。
+          # 上游源码固定从上游仓库的载体 Release 取回；取不到源码或缺少
+          # `.upstream-id` 时必须让发布失败，不能发出一个用户无法更新上游的包。
           UPSTREAM_SRC_URL="${UPSTREAM_SRC_URL:-https://github.com/ithtelab/workbuddy-manager/releases/download/upstream-src/workbuddy2api-src.tar.gz}"
           mkdir -p "$STAGE/upstream"
           if curl -fsSL --retry 3 --retry-delay 2 --max-time 120 \
@@ -151,10 +156,18 @@ jobs:
             echo "已内嵌上游源码：$(find "$STAGE/upstream" -type f | wc -l) 个文件"
             echo "has_upstream=1" >> $GITHUB_OUTPUT
           else
-            echo "::warning::取不到上游源码包（$UPSTREAM_SRC_URL）——本次发布包不含 upstream/，新装用户需自备源码（UPSTREAM_SRC）"
-            rmdir "$STAGE/upstream" 2>/dev/null || true
-            echo "has_upstream=0" >> $GITHUB_OUTPUT
+            echo "::error::取不到上游源码包（$UPSTREAM_SRC_URL）。上游已由本项目维护，不能再发布不含 upstream/ 的包。"
+            exit 1
           fi
+          if [ ! -s "$STAGE/upstream/.upstream-id" ]; then
+            echo "::error::包内 upstream/.upstream-id 缺失或为空；更新器无法判断是否需要同步上游。"
+            exit 1
+          fi
+          # 上游镜像的稳定标识随镜像 label 下发（dev.workbuddy.upstream-id）：
+          # 面板读本机容器的镜像 label 即可判断「镜像部署且与本次发布同源」，
+          # 不再要求镜像部署用户的磁盘上有源码目录（issue #254）。
+          UPSTREAM_ID="$(cat "$STAGE/upstream/.upstream-id")"
+          echo "upstream_id=$UPSTREAM_ID" >> $GITHUB_OUTPUT
           # 写入版本标记：管理端「系统更新」页与安装流程据此显示当前版本
           echo "${TAG}" > "$STAGE/.version"
           # 不含运行时数据与凭据
@@ -180,7 +193,7 @@ jobs:
 
       - name: 安装 Go（校验随包上游）
         if: steps.pack.outputs.has_upstream == '1'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: ${{ steps.pack.outputs.stage }}/upstream/go.mod
           cache: false
@@ -378,18 +391,18 @@ jobs:
       - name: 设置 QEMU
         # 跨架构构建 arm64 层需要它：runner 是 amd64，模拟出 arm64 执行环境
         continue-on-error: true
-        if: inputs.build_images == true
-        uses: docker/setup-qemu-action@v3
+        if: github.event_name == 'push' || inputs.tag != ''
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: 设置 Buildx
         continue-on-error: true
-        if: inputs.build_images == true
-        uses: docker/setup-buildx-action@v3
+        if: github.event_name == 'push' || inputs.tag != ''
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: 登录 GHCR
         continue-on-error: true
-        if: inputs.build_images == true
-        uses: docker/login-action@v3
+        if: github.event_name == 'push' || inputs.tag != ''
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -403,7 +416,7 @@ jobs:
         continue-on-error: true
         if: inputs.build_images == true
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           # 多平台必须走 buildx 并直接 push：本地镜像库放不下多架构的 manifest list
@@ -425,6 +438,50 @@ jobs:
           # 多架构构建下镜像不在本地库里，digest 只能取自 build-push-action 的输出。
           echo "镜像：${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo "平台：linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+
+      # ── 构建并发布**上游**容器镜像（issue #241）───────────────────────
+      #
+      # 管理端镜像按设计不含上游（见 Dockerfile 头注释），要跑多个上游容器做分组
+      # 的用户此前只能自己 build：先拉 golang 基础镜像、再编译 6 个二进制，国内
+      # 网络常常卡在拉基础镜像那一步，或者被拿到的第三方镜像版本拖偏（issue #241
+      # 的现场：「更新 2.8.0 之后显示与项目上游源码不一致」）。
+      #
+      # 这里用**发布包里那份源码**（= upstream-src 资产 + 全部补丁，前面已校验
+      # 过补丁一条不少）原样构建，镜像与面板随包上游是同一份代码，不存在版本漂移。
+      # 取不到上游源码（has_upstream=0）时整段跳过，不阻断发布。
+      #
+      # 首次发布后要在仓库 Packages 里把该包设为 **public**：GHCR 新建包默认私有，
+      # 用户在未登录状态下 `docker pull` 会 401（管理端镜像当年也踩过这一步）。
+      - name: 解析上游镜像名
+        # GHCR 仓库名必须全小写（与上面管理端镜像同理）
+        if: steps.pack.outputs.has_upstream == '1' && (github.event_name == 'push' || inputs.tag != '')
+        id: upstream_image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/workbuddy2api"
+          echo "name=${IMAGE,,}" >> $GITHUB_OUTPUT
+
+      - name: 构建并推送上游镜像（amd64 + arm64）
+        # 与管理端镜像同属**附属产物**：推不上去只影响这一步，发布结果不受牵连。
+        continue-on-error: true
+        if: steps.pack.outputs.has_upstream == '1' && (github.event_name == 'push' || inputs.tag != '')
+        id: build_upstream
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ steps.pack.outputs.stage }}/upstream
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.upstream_image.outputs.name }}:${{ steps.vars.outputs.version }}
+            ${{ steps.upstream_image.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.vars.outputs.version }}
+            dev.workbuddy.upstream-id=${{ steps.pack.outputs.upstream_id }}
+          provenance: false
+
+      - name: 记录上游镜像 digest
+        if: steps.build_upstream.outcome == 'success'
+        run: |
+          echo "上游镜像：${{ steps.upstream_image.outputs.name }}@${{ steps.build_upstream.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
 
       - name: 部署说明
         run: |
@@ -465,7 +522,11 @@ jobs:
           ```bash
           docker compose up -d --build
           ```
-          需要预构建镜像时，请手动运行工作流并启用 build_images。
+
+          上游也可以直接用预构建镜像（可选，省掉本地编译）：
+          ```bash
+          docker pull ghcr.io/${{ github.repository_owner }}/workbuddy2api:${{ steps.vars.outputs.version }}
+          ```
           EOF
 
   # ── Windows 安装器（单文件 exe，随包分发给桌面用户）────────────────────
@@ -482,13 +543,13 @@ jobs:
     needs: release
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.release.outputs.tag }}
           # build.ps1 用 git describe 取版本号写进 exe 的文件属性
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm

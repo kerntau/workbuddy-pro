@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections import deque
+import datetime
 import ipaddress
 import json
+import logging
 import os
 import re
 import shutil
@@ -14,12 +16,15 @@ import ssl
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from .. import config
 from .filelock import file_lock
 from . import realm as _realm
 from .errtext import err_text
 from .realm import realm_of, supports_checkin
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_file(filename: str, auth_dir: Path | None = None) -> Path:
@@ -269,7 +274,10 @@ def list_auth_accounts(auth_dir: Path | None = None) -> list[dict]:
                 # 钳制与默认值只在选号时生效（上游 auth.PickWeight）。
                 'weight': _weight_of(raw),
                 # 该版本是否支持签到体系（国际版没有，调用方据此跳过而不是打 4xx）
-                'checkin_supported': supports_checkin(
+                # 企业账号（enterpriseId 非空）没有个人成长体系：签到端点恒返回
+                # 400 code=10001「企业账号不支持该操作」（实测 2026-10-18）。
+                # 这里直接置 False，面板不渲染签到按钮、定时任务也不发起请求。
+                'checkin_supported': not str(acct.get('enterpriseId') or '').strip() and supports_checkin(
                     realm_of({'realm': raw.get('realm') or auth.get('realm'),
                               'domain': auth.get('domain')})),
                 'source': 'file',
@@ -339,15 +347,14 @@ def merge_pool_status(accounts: list[dict], status: dict) -> list[dict]:
         a['rate_limited_models'] = _rl if isinstance(_rl, list) else []
         a['disabled'] = bool(p.get('disabled'))
         # 运维手动停用（上游 issue #138/#118，本面板 issue #45）。与 `disabled`
-        # **并列独立**：那个是上游按错误分类自动禁的（11140 需重新登录），
+        # **并列独立**：那个是上游按错误分类自动禁的（包括上游账号封禁），
         # 这个是运维主动摘的，前者可 revive、后者该 enable。上游对叠加态
         # 两个字段分别透出，我们照搬，前端才能把「系统判定坏了」与
         # 「我主动摘的」分开说——合并成一个字段会互相覆盖（上游注释的原话）。
+        a['refresh_risk'] = p.get('refresh_risk')
         a['manual_disabled'] = bool(p.get('manual_disabled'))
         a['manual_reason'] = str(p.get('manual_reason') or '')
-        # 禁用原因：上游对 11140（request illegal，需重新 OAuth 登录）会**硬禁用**
-        # 账号（到期也不自愈），对 14017（试用未激活）只软冷却。展示原因才能
-        # 让用户知道该去重新登录，而不是干等冷却。
+        # request illegal 表示上游账号封禁，重登无法解封；14017 只软冷却。
         a['disabled_reason'] = str(p.get('disabled_reason') or '')
         a['success_count'] = p.get('success_count')
         a['in_flight'] = p.get('in_flight')
@@ -543,7 +550,7 @@ def _admin_route_missing(resp: object) -> bool:
 
 async def _admin_account_call(uid: str, action: str, *, reason: str = '',
                               base_url: str | None = None,
-                              api_key: str | None = None) -> tuple[bool, str, str, dict]:
+                              api_key: str | None = None, payload: dict | None = None) -> tuple[bool, str, str, dict]:
     """调上游的 `POST /admin/accounts/{uid}/{action}`，返回 (成功, 说明, 结果码, 回显)。
 
     三个 action（disable / enable / revive）的**错误语义完全一样**，所以只写一份；
@@ -571,7 +578,7 @@ async def _admin_account_call(uid: str, action: str, *, reason: str = '',
         return False, 'uid 为空', 'error', {}
     base = (base_url or config.WB2API_BASE).rstrip('/')
     url = f'{base}/admin/accounts/{uid}/{action}'
-    body: dict = {'reason': reason} if (action == 'disable' and reason) else {}
+    body: dict = payload if payload is not None else ({'reason': reason} if (action == 'disable' and reason) else {})
     try:
         async with config.http_client(10, connect=3) as client:
             resp = await client.post(url, json=body, headers=_auth_headers(api_key))
@@ -590,6 +597,28 @@ async def _admin_account_call(uid: str, action: str, *, reason: str = '',
     except Exception:  # noqa: BLE001 —— 回显只是锦上添花，解析不了不算失败
         payload = {}
     return True, '', 'ok', payload if isinstance(payload, dict) else {}
+
+
+async def clear_model_block(uid: str, model: str, *, base_url: str | None = None,
+                            api_key: str | None = None) -> tuple[bool, str, str]:
+    """成功探测同步到运行中的网关；只清 11102，不清真实模型配额或账号状态。
+
+    第三项是 `_admin_account_call` 的结果码：`no_route` 表示上游没注册管理接口
+    （`admin.enabled` 默认 false）。那不是同步失败，只是没有这条同步通道 ——
+    调用方据此按「不可用」处理，别把它报成错误、也别反复重试。
+    """
+    action = f'models/{quote(model, safe="")}/available'
+    ok, message, code, _ = await _admin_account_call(
+        uid, action, base_url=base_url, api_key=api_key)
+    return ok, message, code
+
+
+async def set_refresh_risk(uid: str, retry_after: int, **kwargs) -> tuple[bool, str, str, dict]:
+    return await _admin_account_call(uid, 'refresh-risk', payload={'retry_after_sec': retry_after}, **kwargs)
+
+
+async def clear_refresh_risk(uid: str, **kwargs) -> tuple[bool, str, str, dict]:
+    return await _admin_account_call(uid, 'refresh-risk/clear', **kwargs)
 
 
 async def set_manual_disabled(uid: str, disabled: bool, reason: str = '',
@@ -625,6 +654,15 @@ async def set_manual_disabled(uid: str, disabled: bool, reason: str = '',
                   else '已通过上游状态位启用'), 'ok'
 
 
+def is_account_banned(account: dict) -> bool:
+    """11140 还可表示模型限流；封禁判断必须包含 request illegal 等语义。"""
+    reason = str(account.get('disabled_reason') or '')
+    if account.get('disabled') is not True or re.search(r'11128|11-128|channel check|渠道校验', reason, re.I):
+        return False
+    return bool(re.search(r'账号存在异常行为|已被限制使用', reason) or (
+        re.search(r'\b11140\b', reason) and re.search(r'request illegal|account banned', reason, re.I)))
+
+
 async def revive_account(uid: str, *, base_url: str | None = None,
                          api_key: str | None = None) -> tuple[bool, str, str]:
     """解除上游的**系统自动禁用**（`disabled`）—— 与 manual_disabled 是两位。
@@ -650,6 +688,16 @@ async def revive_account(uid: str, *, base_url: str | None = None,
 
     `changed=false`（本来就没被禁用）也算成功——幂等，调用方不必先查状态。
     """
+    uid = str(uid or '').strip()
+    if not uid:
+        return False, '账号 uid 不能为空', 'error'
+    # 换令牌不能解除腾讯侧风控；自动重登与手动启用均不得重新投放已封禁账号。
+    status = await get_status(base_url=base_url, api_key=api_key)
+    account = next((a for a in status.get('accounts') or [] if str(a.get('uid') or '') == uid), None)
+    if not status.get('connected') or account is None:
+        return False, '无法确认账号封禁状态，未解除系统禁用，请稍后重试', 'error'
+    if is_account_banned(account):
+        return False, '账号被封禁：上游限制使用，重新登录不能解除限制；如需申诉请向腾讯提交反馈', 'banned'
     ok, msg, code, payload = await _admin_account_call(
         uid, 'revive', base_url=base_url, api_key=api_key)
     if not ok:
@@ -736,6 +784,41 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
             pass
 
 
+# 强制冷却写入 manual_reason 的固定前缀。上游签到只会重置 until，不会碰
+# manual_disabled；到期清理必须能区分「强制冷却留下的状态位」与用户主动
+# 摘流量的 manual_disabled，只清前者。
+#
+# **到期时间必须从 manual_reason 里读，不能读 until**：上游签到
+# `ReenableIfCredits` 会把 until 重置成零值（这正是 manual_disabled 要防的
+# 那条路径），拿 until 判断到期会在签到后立刻把冷却清掉，等于白做。
+_MANUAL_COOLING_PREFIX = '手动冷却'
+_MANUAL_COOLING_RE = re.compile(
+    r'^' + re.escape(_MANUAL_COOLING_PREFIX) + r'（到期 ([^）]+)）：'
+)
+
+
+def _manual_cooling_reason(until: str, reason: str) -> str:
+    return f'{_MANUAL_COOLING_PREFIX}（到期 {until}）：{reason}'
+
+
+def _is_manual_cooling_reason(value: object) -> bool:
+    return bool(_MANUAL_COOLING_RE.match(str(value or '')))
+
+
+def _cooling_until(value: object) -> datetime.datetime | None:
+    """解析 state.json 的 until；无法解析返回 None（不猜、不清）。"""
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
 def clear_account_cooling_state(uid: str) -> dict:
     """清除一个账号在 state.json 中的冷却、熔断、降权与模型级限流。
 
@@ -786,6 +869,12 @@ def clear_account_cooling_state(uid: str) -> dict:
     account['consecutive_fails'] = 0
     if not bool(account.get('disabled')):
         account.pop('reason', None)
+    # 只解除本模块写入的强制冷却标记；用户手动摘流量时的 reason 即使碰巧
+    # 含“冷却”也不该被一次“清除冷却”动作顺手解掉。
+    if account.get('manual_disabled') and _is_manual_cooling_reason(
+            account.get('manual_reason')):
+        account['manual_disabled'] = False
+        account.pop('manual_reason', None)
 
     backup = path.with_name(path.name + '.force-clear.bak')
     shutil.copy2(path, backup)
@@ -846,6 +935,15 @@ def set_account_cooling_state(
     account['cool_kind'] = 0  # 0 = CoolHard (hard_credit)，保证全冷却兜底时也不会被选中
     account['reason'] = str(reason or '手动设置冷却').strip()
     account['soft_streak'] = 0
+    # 防护：上游 stock workbuddy2api 的定期签到（ReenableIfCredits）在查得余额大于 0 时
+    # 会调用 reviveCoolingLocked() 重置 until。为防止账号在签到后被自动解冻并消耗积分，
+    # 同步置位 manual_disabled（上游对其承诺：签到解冻绝不解除手动停用，选号完全排除，任务照常）。
+    account['manual_disabled'] = True
+    # 前缀 + 到期时间：既让 clear/force_clear 能识别这是冷却留下的状态位，
+    # 也让到期清理不必依赖 until 之外的隐含约定。永久冷却的 until 是 2099，
+    # 清理任务不会碰它。
+    account['manual_reason'] = _manual_cooling_reason(
+        str(account['until']), account['reason'])
 
     _atomic_write_json(path, state)
     return {
@@ -882,6 +980,9 @@ async def _set_upstream_running(running: bool) -> tuple[bool, str]:
         except Exception as exc:  # noqa: BLE001
             return False, f'执行 {script.name} 失败：{exc}'
 
+    if config.WB2API_MODE == 'systemd':
+        return await _systemctl('start' if running else 'stop')
+
     action = 'start' if running else 'stop'
     cmd = ['docker', action]
     if not running:
@@ -899,9 +1000,55 @@ async def _set_upstream_running(running: bool) -> tuple[bool, str]:
         detail = err.decode(errors='ignore').strip()
         return False, detail or f'docker {action} 退出码 {proc.returncode}'
     except FileNotFoundError:
-        return False, '未找到 docker 命令'
+        return False, _NO_DOCKER_HINT
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
+
+
+# 默认 WB2API_MODE=docker 却找不到 docker：多半是宿主机直跑上游（issue #329）。
+# 光说「未找到 docker 命令」用户不知道怎么办，把出路一并说清。
+_NO_DOCKER_HINT = (
+    '未找到 docker 命令。若上游不是 docker 容器：由 systemd 托管的请在 .env 设 '
+    'WB2API_MODE=systemd 与 WB2API_SERVICE=<上游 unit 名>；其它原生进程设 '
+    'WB2API_MODE=native 并配置 WB2API_START_SCRIPT / WB2API_STOP_SCRIPT'
+)
+
+_SYSTEMCTL_TIMEOUT = 60
+
+
+async def _systemctl(action: str) -> tuple[bool, str]:
+    """`systemctl <action> <WB2API_SERVICE>`，供 systemd 托管的上游使用（issue #329）。
+
+    非 root 运行时需要 polkit 放行该 unit 的 manage-units（与 install.sh 给
+    workbuddy-web 写的规则同一做法，见 deploy/README.md）。`--no-ask-password`
+    保证没授权时立刻失败并给出原因，而不是挂在交互式提权上。
+    """
+    unit = config.WB2API_SERVICE
+    cmd = ['systemctl', '--no-ask-password', action, unit]
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=_SYSTEMCTL_TIMEOUT)
+    except FileNotFoundError:
+        return False, '未找到 systemctl 命令（WB2API_MODE=systemd 需要 systemd 环境）'
+    except asyncio.TimeoutError:
+        if proc is not None:
+            _kill_quietly(proc)
+        return False, f'systemctl {action} {unit} 超过 {_SYSTEMCTL_TIMEOUT} 秒未结束'
+    except Exception as exc:  # noqa: BLE001
+        return False, f'执行 systemctl 失败：{exc}'
+    if proc.returncode == 0:
+        verb = {'start': '启动', 'stop': '停止', 'restart': '重启'}.get(action, action)
+        return True, f'上游服务 {unit} 已{verb}'
+    detail = (err or b'').decode(errors='ignore').strip()
+    if 'authentication' in detail.lower() or 'access denied' in detail.lower() \
+            or 'interactive' in detail.lower():
+        detail += '（管理端服务账号无权操作该 unit，请按 deploy/README.md 写入 polkit 规则）'
+    return False, detail or f'systemctl {action} {unit} 退出码 {proc.returncode}'
 
 
 async def _wait_for_upstream(timeout: float = 35.0) -> dict:
@@ -913,6 +1060,61 @@ async def _wait_for_upstream(timeout: float = 35.0) -> dict:
             return last
         await asyncio.sleep(1)
     return last
+
+
+def _account_blocks_cleared(account: dict | None) -> bool:
+    if account is None:
+        return False
+    freeze = bool(account.get('manual_disabled')
+                  and _is_manual_cooling_reason(account.get('manual_reason')))
+    return not (account.get('cooling') or account.get('rate_limited_models') or freeze)
+
+
+async def _clear_cooling_online(uid: str, account: dict,
+                                has_freeze: bool) -> tuple[bool, str, dict] | None:
+    """先走上游在线管理接口清除，**不停上游**（issue #329）。
+
+    在线接口只覆盖两类状态，正好是最常见、也最需要急救的两类：
+
+      · 模型级限流里原因为 `11102` 的误标 → `models/{m}/available`
+        （#328：兜底路径的 11102 被当成账号缺模型，整池被 6h 冷却打穿）；
+      · 本模块写入的强制冷却（manual_disabled + 冷却标记）→ `enable`。
+
+    账号级冷却 / 熔断 / 降权、真实 6004 等其它模型限流没有在线接口，返回
+    None 交给原来的「停上游 → 改 state.json → 启上游」。上游没开 admin
+    接口（`no_route`）或在线调用失败时同样返回 None 回退，**不会**因为在线
+    这一步而让原本能成功的离线路径失败。
+    """
+    if account.get('cooling'):
+        return None
+    models = account.get('rate_limited_models') or []
+    names: list[str] = []
+    for item in models:
+        if not isinstance(item, dict) or not str(item.get('reason') or '').startswith('11102'):
+            return None
+        name = str(item.get('model') or '').strip()
+        if not name:
+            return None
+        names.append(name)
+    if not names and not has_freeze:
+        return None
+
+    for name in names:
+        ok, _msg, _code = await clear_model_block(uid, name)
+        if not ok:
+            return None
+    if has_freeze:
+        ok, _msg, _code = await set_manual_disabled(uid, False)
+        if not ok:
+            return None
+
+    status = await get_status()
+    after = next((x for x in status.get('accounts') or []
+                  if str(x.get('uid') or '') == uid), None)
+    if not status.get('connected') or not _account_blocks_cleared(after):
+        return None
+    return True, '已通过上游管理接口在线清除（无需重启上游）', {
+        'uid': uid, 'online': True, 'models': names, 'unfrozen': has_freeze}
 
 
 async def force_clear_account_cooling(uid: str) -> tuple[bool, str, dict]:
@@ -929,8 +1131,15 @@ async def force_clear_account_cooling(uid: str) -> tuple[bool, str, dict]:
         )
         if account is None:
             return False, '该账号不在上游账号池里', {}
-        if not account.get('cooling') and not account.get('rate_limited_models'):
+        has_freeze = bool(
+            account.get('manual_disabled')
+            and _is_manual_cooling_reason(account.get('manual_reason'))
+        )
+        if not account.get('cooling') and not account.get('rate_limited_models') and not has_freeze:
             return True, '该账号当前没有冷却或模型级限流状态，无需清除', {}
+        online = await _clear_cooling_online(uid, account, has_freeze)
+        if online is not None:
+            return online
 
     stopped, stop_message = await _set_upstream_running(False)
     if not stopped:
@@ -956,7 +1165,11 @@ async def force_clear_account_cooling(uid: str) -> tuple[bool, str, dict]:
     )
     if account is None:
         return False, '状态已清除且上游已启动，但账号尚未进入账号池', changed
-    if account.get('cooling') or account.get('rate_limited_models'):
+    has_freeze_after = bool(
+        account.get('manual_disabled')
+        and _is_manual_cooling_reason(account.get('manual_reason'))
+    )
+    if account.get('cooling') or account.get('rate_limited_models') or has_freeze_after:
         return False, '上游已重启，但冷却或模型限流状态仍然存在', changed
 
     return True, '已强制清除冷却与模型限流状态，上游已重启生效', changed
@@ -996,10 +1209,78 @@ async def force_set_account_cooling(
     )
     if account is None:
         return False, '状态已设定且上游已启动，但账号尚未进入账号池', changed
-    if not account.get('cooling'):
+    if not account.get('cooling') and not account.get('manual_disabled'):
         return False, '上游已重启，但冷却状态未生效（可能已过截止时间）', changed
 
     return True, '已强制设定冷却状态，上游已重启生效', changed
+
+
+def expired_manual_cooling_uids(
+    now: datetime.datetime | None = None,
+) -> list[str]:
+    """列出「强制冷却已到期」的 uid。
+
+    只认 `manual_reason` 里带 `_MANUAL_COOLING_PREFIX` 标记、且**标记中的
+    到期时间**已过的条目；用户自己摘流量的 manual_disabled（reason 是别的
+    文案）不在范围内。到期时间必须取自 reason，不能取 `until` —— 上游签到
+    会把 until 重置成零值，拿它判断会在签到后立刻清掉冷却。
+    读不到/解析不了 state.json 时返回空列表，让调用方下一轮再试。
+    """
+    try:
+        path = upstream_state_file()
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:  # noqa: BLE001
+        return []
+    accounts = state.get('accounts') if isinstance(state, dict) else None
+    if not isinstance(accounts, dict):
+        return []
+    current = now or datetime.datetime.now(datetime.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=datetime.timezone.utc)
+    expired: list[str] = []
+    for uid, account in accounts.items():
+        if not isinstance(account, dict) or not account.get('manual_disabled'):
+            continue
+        reason = str(account.get('manual_reason') or '')
+        match = _MANUAL_COOLING_RE.match(reason)
+        if not match:
+            continue
+        until = _cooling_until(match.group(1))
+        if until is not None and until <= current:
+            expired.append(str(uid))
+    return sorted(expired)
+
+
+async def clear_expired_manual_cooling() -> int:
+    """恢复已到期的强制冷却账号，返回实际清除的数量。
+
+    上游签到只会重置 until，不会清 manual_disabled；不主动清理的话，定时冷却
+    到期后会一直停在「已停用」，与界面上「到期后自动恢复」的承诺不符。
+    只在真的有过期条目时才停上游（写 state.json 必须离线，否则周期 Flush
+    会覆盖），清完立刻启动。
+    """
+    uids = expired_manual_cooling_uids()
+    if not uids:
+        return 0
+    stopped, stop_message = await _set_upstream_running(False)
+    if not stopped:
+        logger.warning('强制冷却到期清理：停止上游失败（%s），下轮重试', stop_message)
+        return 0
+    cleared = 0
+    try:
+        for uid in uids:
+            try:
+                clear_account_cooling_state(uid)
+                cleared += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('强制冷却到期清理失败 uid=%s: %s', uid, exc)
+    finally:
+        started, start_message = await _set_upstream_running(True)
+        if not started:
+            logger.warning('强制冷却到期清理后启动上游失败：%s', start_message)
+    if cleared:
+        logger.info('已恢复 %d 个到期的强制冷却账号', cleared)
+    return cleared
 
 
 def admin_enabled_in_config() -> tuple[bool | None, str]:
@@ -1220,6 +1501,9 @@ async def restart_container(container: str | None = None) -> tuple[bool, str]:
                 return False, f'{script.name} 退出码 {proc.returncode}'
         return True, '原生 workbuddy2api 已重启'
 
+    if config.WB2API_MODE == 'systemd':
+        return await _systemctl('restart')
+
     return await _docker_restart(config.WB2API_CONTAINER)
 
 
@@ -1236,26 +1520,37 @@ async def _docker_restart(name: str) -> tuple[bool, str]:
             return True, f'容器 {name} 已重启'
         return False, (err.decode(errors='ignore').strip() or f'docker 退出码 {proc.returncode}')
     except FileNotFoundError:
-        return False, '未找到 docker 命令'
+        return False, _NO_DOCKER_HINT
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
 
 
 def read_container_logs(limit: int = 200, timestamps: bool = True,
-                        with_mtime: bool = False) -> list[str] | tuple[list[str], float | None]:
+                        with_mtime: bool = False,
+                        path: Path | None = None,
+                        container: str | None = None) -> list[str] | tuple[list[str], float | None]:
     """读取上游日志（原生日志文件或 Docker，失败返回空列表）。
+
+    `container` 指定要读的容器名（issue #389：多分组部署里每组一个上游容器）。
+    显式传入时**总是走 `docker logs`**，即使面板自身是 native/systemd 模式——
+    分组容器是独立的 Docker 实例，日志不在本机文件里。
 
     默认带 `--timestamps`：docker 会在每行前面加上精确到纳秒的 RFC3339 时间，
     自动任务日志据此获得准确时间并据此去重（上游自己的 log 前缀精度只到秒）。
 
     `with_mtime=True` 额外返回原生日志文件的 mtime；Docker 模式返回 None。
     账号回填需要它：原生日志行只有 `HH:MM:SS`，没有日期，不能单独还原 epoch。
+
+    `path` 指定原生模式读哪个文件，缺省仍是 `WB2API_LOG_FILE`。账号回填必须传
+    `WB2API_CHAT_LOG_FILE`：上游把对话行写 stdout、业务行写 stderr，原生模式两者
+    是两个文件。Docker 模式忽略它 —— `docker logs` 本来就把两路合并在一起。
     """
-    if config.WB2API_MODE == 'native':
+    if container is None and config.WB2API_MODE == 'native':
+        source = path or config.WB2API_LOG_FILE
         try:
             count = max(1, min(5000, limit))
-            mtime = config.WB2API_LOG_FILE.stat().st_mtime
-            with config.WB2API_LOG_FILE.open('r', encoding='utf-8', errors='replace') as fh:
+            mtime = source.stat().st_mtime
+            with source.open('r', encoding='utf-8', errors='replace') as fh:
                 lines = [ln.rstrip('\r\n') for ln in deque(fh, maxlen=count) if ln.strip()]
             return (lines, mtime) if with_mtime else lines
         except Exception:  # noqa: BLE001
@@ -1263,10 +1558,14 @@ def read_container_logs(limit: int = 200, timestamps: bool = True,
 
     import subprocess
 
+    if container is None and config.WB2API_MODE == 'systemd':
+        lines = _journal_lines(max(1, min(5000, limit)), timestamps)
+        return (lines, None) if with_mtime else lines
+
     cmd = ['docker', 'logs', '--tail', str(max(1, min(5000, limit)))]
     if timestamps:
         cmd.append('--timestamps')
-    cmd.append(config.WB2API_CONTAINER)
+    cmd.append(container or config.WB2API_CONTAINER)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
         # docker logs 把应用日志写到 stderr
@@ -1275,6 +1574,43 @@ def read_container_logs(limit: int = 200, timestamps: bool = True,
         return (lines, None) if with_mtime else lines
     except Exception:  # noqa: BLE001
         return ([], None) if with_mtime else []
+
+
+# journalctl -o short-iso-precise --utc 的行。注意**偏移量是 `+0000`，不带冒号**：
+#
+#   2026-10-28T04:00:00.123456+0000 workbuddy2api[812]: [checkin] ok
+#
+# systemd 的 short-iso / short-iso-precise 两种格式都用 `+HHMM`（文档与源码一致），
+# 而带冒号的 `+00:00` 只在别的工具里常见。两种都收，否则 systemd 部署下**每一行**
+# 都匹配不上、日志静默为空 —— 账号回填与任务日志会一起失效，且没有任何报错。
+_JOURNAL_LINE = re.compile(
+    r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)[+-]00:?00\s+[^\s:]+(?:\[\d+\])?:\s?(.*)$')
+
+
+def _journal_lines(limit: int, timestamps: bool) -> list[str]:
+    """systemd 托管上游的日志（issue #329）。
+
+    转成与 `docker logs --timestamps` 相同的形状（`<RFC3339>Z <原文>`），
+    任务日志 / 账号回填的解析器因此不用为第三种部署形态再写一套。
+    """
+    import subprocess
+
+    cmd = ['journalctl', '-u', config.WB2API_SERVICE, '-n', str(limit),
+           '--no-pager', '--utc', '-o', 'short-iso-precise']
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[str] = []
+    for raw in (proc.stdout or '').splitlines():
+        m = _JOURNAL_LINE.match(raw)
+        if not m:
+            continue  # `-- No entries --` 等 journalctl 自己的提示行
+        ts, msg = m.group(1), m.group(2)
+        if not msg.strip():
+            continue
+        out.append(f'{ts}Z {msg}' if timestamps else msg)
+    return out
 
 
 # 管理端**允许读写**的上游配置段。既是 `save_upstream_config` 的写入白名单，
@@ -1341,6 +1677,10 @@ def load_upstream_config() -> dict:
         # 界面确实要用的非敏感顶层项
         k: cfg[k] for k in ('listen',) if k in cfg
     }
+    # 顶层布尔开关：思考通道兜底（上游 reasoning_as_content）。
+    # 缺省时按上游默认值 True 回显 —— 让界面显示「实际生效的状态」，
+    # 而不是「文件里有没有这个键」。
+    view['reasoning_as_content'] = cfg.get('reasoning_as_content', True) is not False
     # 只放界面能编辑的那些配置段（与 save_upstream_config 的允许集合一致）
     for section in _EDITABLE_SECTIONS:
         if section in cfg and isinstance(cfg[section], dict):
@@ -1424,6 +1764,9 @@ _INT_RANGES: dict[str, tuple[int, int, str]] = {
     # 单独登记是为了享受同样的区间校验 —— 不登记的话它会被归到「未知键」
     # 原样透传，用户填个负数或超大值也能写进上游配置。
     'max_in_flight_global': (0, 64, '个'),
+    # 保底积分（issue #364）：低于该值的账号只作最后候选。0 = 关闭。
+    # 上限 100 万：官方单号积分远低于此，留足空间又不至于误填超大值。
+    'credit_floor': (0, 1000000, '积分'),
     'breaker_threshold': (1, 100, '次'),
     # 连败降权阈值（上游 cf1e7e5 新增 pool.degrade_threshold，默认 5）：ErrClient 与
     # 传输层失败连续达此次数即临时出池。登记以享受同样的区间校验。
@@ -1621,9 +1964,11 @@ def _sanitize_section(section: str, incoming: dict) -> dict:
             if len(val) > _UPSTREAM_TEXT_MAX:
                 raise ValueError(f'upstream.{key} 过长（上限 {_UPSTREAM_TEXT_MAX} 字符）')
             out[key] = val
-        elif section == 'upstream' and key == 'passthrough_ip':
+        elif section == 'upstream' and key in ('passthrough_ip', 'gzip_body'):
+            # 布尔开关先登记：未登记的键会被当成「未知键」静默忽略，用户在界面上
+            # 关掉 gzip 却没生效（issue #297 的排障路径依赖这个开关）。
             if not isinstance(raw, bool):
-                raise ValueError('upstream.passthrough_ip 必须是布尔值')
+                raise ValueError(f'upstream.{key} 必须是布尔值')
             out[key] = raw
         elif section == 'global' and key == 'enabled':
             # 逃生门开关：false = 锁死纯 CN（上游语义），必须是真布尔
@@ -1687,6 +2032,17 @@ def save_upstream_config(patch: dict) -> dict:
             if clean.pop('__delete__', False):
                 cfg[field].pop('device_token', None)
             cfg[field].update(clean)
+
+    # 顶层布尔开关：思考通道兜底（reasoning_as_content）。
+    # 它不是任何配置段的成员，所以不能走上面的段循环 —— 塞进段里会写到
+    # config.json 的错误路径，上游读到的是未知键，改了等于没改。
+    if 'reasoning_as_content' in patch:
+        raw = patch['reasoning_as_content']
+        # 只接受真布尔：字符串 "false" 在 Go 侧解析 json 时是类型错误，
+        # 会让上游启动失败，这里必须拦住而不是"尽量转换"。
+        if not isinstance(raw, bool):
+            raise ValueError('reasoning_as_content 必须是 true 或 false')
+        cfg['reasoning_as_content'] = raw
 
     if isinstance(patch.get('schedule'), dict) and any(
         key in patch['schedule'] for key in ('account_delay_min_seconds', 'account_delay_max_seconds')

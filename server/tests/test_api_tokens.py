@@ -194,7 +194,6 @@ class ApiTokenTest(unittest.TestCase):
         cases = [
             ('post', '/api/logs/clear', None),
             ('post', '/api/system/update', {'target': 'manager'}),
-            ('post', '/api/system/upstream-ref', {'ref': ''}),
             ('post', '/api/security/logs/clear', None),
             ('post', '/api/users', {'username': 'x', 'password': '12345678', 'role': 'viewer'}),
             # 评审补：这条同样是「重启上游容器」，与 /api/restart 同一个动作 ——
@@ -302,7 +301,9 @@ class WriteEndpointScopeMatrixTest(unittest.TestCase):
         'POST /api/settings/proxy/probe',
         'POST /api/settings/upstash/reload',   # 评审补：与 /api/restart 同动作
         'POST /api/system/update',
-        'POST /api/system/upstream-ref',
+        # 自动更新开关：开了就等于授权面板无人值守时自行下载安装新版本并重启，
+        # 与一键更新同级，只对会话开放。
+        'PUT /api/settings/auto-update',
         'POST /api/task-logs/clear',
         'POST /api/tokens',
         'POST /api/users',
