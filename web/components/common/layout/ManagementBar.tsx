@@ -8,6 +8,7 @@ import {
   KeyRound,
   Boxes,
   ScrollText,
+  Radar,
   TrendingUp,
   ShieldCheck,
   Settings,
@@ -606,6 +607,15 @@ export function ManagementBar() {
       groupKey: 'governance',
     },
     {
+      // 轨迹（调用抓包）与请求日志同属「治理」组，但**同级的入口**：
+      // 日志回答「谁用了多少」，轨迹回答「这一轮到底发了什么、改了什么」，
+      // 是两种不同的动作（扫一眼 vs 逐轮对比），不该藏进二级导航里。
+      title: t('nav.traces'),
+      icon: <Radar {...IconOptions} />,
+      href: '/traces',
+      groupKey: 'governance',
+    },
+    {
       title: t('nav.security'),
       icon: <ShieldCheck {...IconOptions} />,
       href: '/security',
@@ -682,7 +692,7 @@ export function ManagementBar() {
                                 {me.username}
                               </div>
                               <div className="truncate text-xs text-muted-foreground">
-                                Workbuddy Pro
+                                WorkBuddy Manager
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
