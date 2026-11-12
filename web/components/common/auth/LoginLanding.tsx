@@ -1,9 +1,8 @@
 'use client';
 
 import {useEffect, useRef, useState} from 'react';
-import {useRouter} from 'next/navigation';
 import Image from 'next/image';
-import {motion} from 'motion/react';
+import {useRouter} from 'next/navigation';
 import {Loader2, LogIn} from 'lucide-react';
 import {errText} from '@/lib/api';
 import {withBasePath} from '@/lib/base-path';
@@ -20,9 +19,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/animate-ui/radix/dialog';
-import {LanguageToggle} from '@/components/common/layout/LanguageToggle';
 import {useT} from '@/lib/i18n/provider';
 
+/**
+ * 根路径的伪装页：对外是一张「站点正在维护」的公告。
+ *
+ * 设计意图（别当成排版改掉）：
+ * - 页面上**不能出现**面板名、账号池、网关、管理端这类字样，也不能放语言切换器
+ *   —— 那些都是「这是个面板」的指纹，伪装就白做了。Logo 是自家图形，保留。
+ * - 极简：只有 Logo、一句话、一行状态、一个出口。没有卡片、没有边框容器、
+ *   没有进度条 —— 维护公告本来就不该抢注意力，信息越少越像真的。
+ * - 不加动效：静态页在慢网络 / 低端设备上也不会跳动，且维护页不需要
+ *   「正在进行」的暗示（那反而像在演）。
+ * - 深浅色跟随系统（全部走主题变量，没有写死色值）。
+ * - 登录入口藏在 Logo 上：连点 3 次才弹窗，4 秒内没继续点就归零 —— 访客不会
+ *   闲着去连点一个 logo，顺手点歪也碰不到登录框。
+ * - 弹窗内部与登录提交逻辑保持原样（含从 DOM 读值以兼容密码管理器自动填充）。
+ */
 export default function LoginLanding() {
   const {me, loading, login} = useAuth();
   const router = useRouter();
@@ -32,8 +45,9 @@ export default function LoginLanding() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
-  const logoClicks = useRef(0);
-  const logoButton = useRef<HTMLButtonElement>(null);
+  const secretClicks = useRef(0);
+  const secretTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logoRef = useRef<HTMLButtonElement>(null);
   // 会话过期跳转（`api.ts` 的 401 拦截器会带 `?expired=1`）。读
   // `window.location.search` 而不是 `useSearchParams`：静态导出下后者必须包一层
   // Suspense，为一行提示不值得改整页结构。
@@ -48,20 +62,34 @@ export default function LoginLanding() {
     setExpired(new URLSearchParams(window.location.search).get('expired') === '1');
   }, []);
 
-  function handleLogoClick() {
-    logoClicks.current += 1;
-    if (logoClicks.current === 5) {
-      logoClicks.current = 0;
+  useEffect(() => () => {
+    if (secretTimer.current) clearTimeout(secretTimer.current);
+  }, []);
+
+  // 隐藏入口：Logo 连点 3 次。4 秒没有继续点就从头数。
+  function handleSecretClick() {
+    if (secretTimer.current) clearTimeout(secretTimer.current);
+    secretClicks.current += 1;
+    if (secretClicks.current >= 3) {
+      secretClicks.current = 0;
       setLoginOpen(true);
+      return;
     }
+    secretTimer.current = setTimeout(() => {
+      secretClicks.current = 0;
+    }, 4000);
   }
 
   function handleLoginOpenChange(open: boolean) {
     setLoginOpen(open);
     if (!open) {
-      logoClicks.current = 0;
+      secretClicks.current = 0;
       setPassword('');
       setError('');
+      // 关闭后把焦点还给 Logo。原先靠 DialogContent 的 onCloseAutoFocus，
+      // 但那个 prop 会被透传到 DOM 上（控制台报 Unknown event handler property），
+      // 实际不生效 —— 这里显式还原，键盘用户才不会丢焦点。
+      requestAnimationFrame(() => logoRef.current?.focus());
     }
   }
 
@@ -106,113 +134,117 @@ export default function LoginLanding() {
   }
 
   return (
-    <div className="bg-background relative flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
-      {/* 未登录也要能换语言：看不懂当前语言的人得先能切过去 */}
-      <div className="absolute right-4 top-4">
-        <LanguageToggle />
-      </div>
-      <motion.div
-        initial={{opacity: 0, y: 12}}
-        animate={{opacity: 1, y: 0}}
-        transition={{duration: 0.35}}
-        className="w-full max-w-sm"
-      >
-        <div className="flex flex-col items-center gap-3 text-center">
+    <div className="flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-16 text-foreground">
+      <main className="flex w-full max-w-[24rem] flex-col items-center text-center">
+        {/* Logo 同时是隐藏入口：连点 3 次 */}
+        <button
+          ref={logoRef}
+          type="button"
+          onClick={handleSecretClick}
+          aria-label="站点图标"
+          className="rounded-xl outline-none transition-opacity duration-150 hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+        >
+          <Image
+            src={withBasePath('/liora-icon.png')}
+            alt=""
+            width={40}
+            height={40}
+            priority
+            draggable={false}
+            className="size-10 select-none object-contain"
+          />
+        </button>
+
+        <h1 className="mt-8 text-balance text-2xl font-semibold sm:text-3xl">
+          站点正在维护
+        </h1>
+
+        <p className="mt-3.5 text-pretty text-[13px] leading-6 text-muted-foreground">
+          我们正在做例行升级，站点暂时不可用，已保存的数据不受影响。
+        </p>
+
+        <p className="mt-6 flex items-center gap-2 text-xs text-muted-foreground">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500" />
+          <span className="tabular-nums">维护进行中 · 预计 30 分钟内恢复</span>
+        </p>
+
+        <div className="mt-10 flex flex-col items-center gap-2.5">
           <button
-            ref={logoButton}
             type="button"
-            onClick={handleLogoClick}
-            aria-label="Workbuddy Pro"
-            className="rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4"
+            onClick={() => window.location.reload()}
+            className="rounded-md text-xs text-foreground/70 underline-offset-4 outline-none transition-colors duration-150 hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            <Image
-              src={withBasePath('/liora-icon.png')}
-              alt="Workbuddy Pro"
-              width={56}
-              height={56}
-              priority
-              draggable={false}
-              className="h-14 w-14 select-none object-contain"
-            />
+            刷新页面
           </button>
-          <div className="space-y-1">
-            <h1 className="text-lg font-semibold tracking-[-0.01em]">Workbuddy Pro</h1>
-            <p className="text-xs text-muted-foreground">
-              {t('login.subtitle')}
-            </p>
-          </div>
+          <p className="text-[11px] text-muted-foreground/70 tabular-nums">
+            © 2026 · 服务维护公告
+          </p>
         </div>
+      </main>
 
-        <Dialog open={loginOpen} onOpenChange={handleLoginOpenChange}>
-          <DialogContent
-            className="max-w-[380px]"
-            showCloseButton={false}
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              logoButton.current?.focus();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle className="text-center">{t('login.submit')}</DialogTitle>
-              <DialogDescription className="text-center">{t('login.subtitle')}</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={submit} className="flex min-h-0 flex-col">
-              <DialogBody className="max-h-[min(400px,calc(100dvh-14rem))]">
-                <div className="space-y-4 px-6 pb-2 pt-1">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="username" className="text-[11px] text-muted-foreground">
-                      {t('login.username')}
-                    </Label>
-                    <Input
-                      id="username"
-                      name="username"
-                      autoComplete="username"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="admin"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="password" className="text-[11px] text-muted-foreground">
-                      {t('login.password')}
-                    </Label>
-                    <Input
-                      id="password"
-                      name="password"
-                      type="password"
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={t('login.passwordPlaceholder')}
-                    />
-                  </div>
-
-                  {expired && !error && (
-                    <p className="text-xs text-amber-600 dark:text-amber-500">{t('login.expiredHint')}</p>
-                  )}
-
-                  {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-
-                  {/* 登录失败时提示初始密码文件的位置，帮助用户取回密码。 */}
-                  {error && (
-                    <p className="text-xs text-muted-foreground">{t('login.initialPwdHint')}</p>
-                  )}
+      {/* 真实登录入口：默认关闭，只在连点 Logo 3 次后出现 */}
+      <Dialog open={loginOpen} onOpenChange={handleLoginOpenChange}>
+        <DialogContent className="max-w-[380px]" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle className="text-center">{t('login.submit')}</DialogTitle>
+            <DialogDescription className="text-center">{t('login.subtitle')}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submit} className="flex min-h-0 flex-col">
+            <DialogBody className="max-h-[min(400px,calc(100dvh-14rem))]">
+              <div className="space-y-4 px-6 pb-2 pt-1">
+                <div className="space-y-1.5">
+                  <Label htmlFor="username" className="text-[11px] text-muted-foreground">
+                    {t('login.username')}
+                  </Label>
+                  <Input
+                    id="username"
+                    name="username"
+                    autoComplete="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="admin"
+                  />
                 </div>
-              </DialogBody>
-              <DialogFooter>
-                <Button type="submit" disabled={busy} className="w-full rounded-full">
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-                  {t('login.submit')}
-                </Button>
-              </DialogFooter>
-            </form>
+                <div className="space-y-1.5">
+                  <Label htmlFor="password" className="text-[11px] text-muted-foreground">
+                    {t('login.password')}
+                  </Label>
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={t('login.passwordPlaceholder')}
+                  />
+                </div>
 
-            <p className="px-6 pb-5 text-center text-[11px] leading-relaxed text-muted-foreground">
-              {t('login.legal')}
-            </p>
-          </DialogContent>
-        </Dialog>
-      </motion.div>
+                {expired && !error && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">{t('login.expiredHint')}</p>
+                )}
+
+                {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+
+                {/* 登录失败时提示初始密码文件的位置，帮助用户取回密码。 */}
+                {error && (
+                  <p className="text-xs text-muted-foreground">{t('login.initialPwdHint')}</p>
+                )}
+              </div>
+            </DialogBody>
+            <DialogFooter>
+              <Button type="submit" disabled={busy} className="w-full rounded-full">
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+                {t('login.submit')}
+              </Button>
+            </DialogFooter>
+          </form>
+
+          <p className="px-6 pb-5 text-center text-[11px] leading-relaxed text-muted-foreground">
+            {t('login.legal')}
+          </p>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
