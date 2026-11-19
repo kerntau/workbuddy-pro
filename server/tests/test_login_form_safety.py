@@ -8,6 +8,10 @@
 修法有两层，都要钉住：
   1. 提交按钮在挂载前 disabled（点不动 → 不会原生提交）；
   2. `<form method="post">` 作为兜底（真被提交也只是一次 405，密码留在请求体里）。
+
+本地定制：登录页只把旧地址重定向回根路径，真正的登录框是根页面上的弹窗、
+用 fetch 提交，没有原生表单。此时改为校验页面里确实没有密码框 / 提交按钮，
+保证今后若加回表单，必须同时补上上面两道保险。
 """
 from __future__ import annotations
 
@@ -25,12 +29,18 @@ class LoginFormSafetyTest(unittest.TestCase):
 
     def test_form_declares_post_method(self) -> None:
         form = re.search(r'<form\b[^>]*>', self.src)
-        self.assertIsNotNone(form, '找不到登录表单')
-        assert form is not None
+        if form is None:
+            self.assertNotRegex(self.src, r'type="password"',
+                                '登录页没有表单，却出现了密码输入框')
+            return
         self.assertIn('method="post"', form.group(0),
                       '登录表单没有声明 method="post"：JS 未就绪时原生提交会把密码拼进 URL')
 
     def test_submit_button_is_gated_on_hydration(self) -> None:
+        if re.search(r'<form\b', self.src) is None:
+            self.assertNotRegex(self.src, r'<Button\s+type="submit"',
+                                '登录页没有表单，却出现了提交按钮')
+            return
         self.assertRegex(self.src, r'const \[ready,\s*setReady\]\s*=\s*useState',
                          '登录页缺少「已挂载」状态')
         self.assertRegex(self.src, r'useEffect\(\(\)\s*=>\s*setReady\(true\)',
