@@ -277,6 +277,14 @@
     "creditsExpiryDaily": "最近一天（{time}）共 {amount} 積分到期"
   },
   "stats": {
+    "realtimeClientInflight": "用戶端在途 {n}",
+    "realtimeConcurrency": "當前併發",
+    "realtimeRpm": "RPM",
+    "realtimeTrend": "近 3 分鐘",
+    "realtimePeak": "峰值 {n}",
+    "realtimeCapacity": "上限 {c}",
+    "realtimeAverage": "3 分鐘均 {v}",
+    "realtimeUnavailable": "上游無法連線",
     "customRange": "自訂",
     "startDate": "開始日期",
     "endDate": "結束日期",
@@ -286,9 +294,11 @@
     "account": "帳號",
     "model": "模型",
     "successRequests": "成功請求",
+    "creditSeries": "積分消耗",
     "title": "用量統計",
     "description": "依時間、模型與金鑰維度統計 Token 消耗與請求量（每 60 秒自動重新整理；目前只統計{realm}）",
     "today": "今日",
+    "yesterday": "昨日",
     "last7": "近 7 天",
     "last30": "近 30 天",
     "last3": "近 3 天",
@@ -345,10 +355,12 @@
     "costUnpriced": "另有 {n} 次未計價",
     "costNote": "按每次呼叫時刻的官方價目估算（分高峰/空閒、快取命中/未命中），僅供參考。上游真實扣的積分見上面的「今日積分」。",
     "colCost": "費用",
-    "costUnavailableHint": "該模型未收錄價目，顯示「—」而不是 0"
+    "costUnavailableHint": "該模型未收錄價目，顯示「—」而不是 0",
+    "realtimeUnlimited": "不限"
   },
   "accounts": {
     "badgeBanned": "● 帳號被封禁",
+    "copyUid": "複製 UID",
     "bannedHint": "上游因帳號異常行為限制使用；重新登入無法解除，請向騰訊提交回饋申訴。",
     "proxyLine": "出口線路",
     "proxyDirect": "預設出口",
@@ -395,6 +407,10 @@
     "groupCooling": "冷卻中",
     "groupStopped": "已停用",
     "sortDefault": "預設順序",
+    "sortManual": "自訂順序",
+    "sortManualHint": "長按「頭像或暱稱」可拖動調整順序；順序對本面板所有使用者生效，只影響顯示，不影響上游選號。",
+    "orderSaved": "帳號順序已儲存",
+    "orderSaveFailed": "儲存帳號順序失敗",
     "sortLabel": "排序方式",
     "sortRemain": "按有效期排序",
     "sortCredits": "按積分排序",
@@ -502,6 +518,7 @@
     "checkin": "簽到",
     "test": "連線測試",
     "refreshToken": "重新整理 Token",
+    "refreshOneCredits": "重新整理此帳號積分",
     "forceClearCooling": "強制退出冷卻與模型限流",
     "forceClearCoolingTitle": "強制退出該帳號的冷卻與模型限流？",
     "forceClearCoolingDesc": "將重新啟動上游容器，並清除該帳號的冷卻、熔斷、連敗降權與模型級限流狀態。若根因仍在，狀態可能很快再次出現；其它帳號與帳號憑證不會受影響。",
@@ -693,6 +710,9 @@
     "daysPlaceholder": "天數",
     "maxIps": "最大 IP 數（0 = 不限）",
     "quotaTokens": "配額 Token（0 = 不限）",
+    "quotaDaily": "每日 Token 限額（0 = 不限）",
+    "quotaDailyHint": "按伺服器本地日期計，每天 0 點自動恢復；與上面的總額度各自獨立，任一超限即拒絕呼叫",
+    "dailyUsed": "今日 {used} / {quota}",
     "ipWhitelist": "IP 白名單（每行一個，支援 CIDR，留空 = 不限制）",
     "modelWhitelist": "模型白名單（逗號分隔，留空 = 該版本全部模型）",
     "modelPrefixNote": "在所選版本之內再限制到具體模型：`global:gpt-5.4` 是國際版模型，`glm-5.2` 是中國版模型。留空則不限制。",
@@ -763,7 +783,10 @@
     "upstreamHint": "綁定後，這把密鑰的請求只走該上游的帳號池；未綁定 = 預設上游",
     "upstreamTag": "上游：{name}",
     "upstreamDisabledSuffix": "（已停用）",
-    "upstreamsFailed": "上游清單沒取到 —— 新建金鑰的「綁定上游」只會顯示預設項，先重試再建立。"
+    "upstreamsFailed": "上游清單沒取到 —— 新建金鑰的「綁定上游」只會顯示預設項，先重試再建立。",
+    "customTokenLabel": "自訂金鑰（選填）",
+    "customTokenPlaceholder": "留空 = 自動產生 wbk_ 開頭的隨機金鑰",
+    "customTokenHint": "從其他閘道遷移時，可直接沿用原本的金鑰（如 sk-xxx），用戶端無需改設定。至少 16 個字元，只能用字母、數字、底線、點與連字號；太容易猜的會被拒絕。需在部署環境變數中設定 WB_KEY_CUSTOM_ENABLED=1 才可用。"
   },
   "upstreams": {
     "title": "多上游（帳號池分組）",
@@ -920,6 +943,7 @@
     "reasonKeyDisabled": "密鑰已停用",
     "reasonKeyExpired": "密鑰已過期",
     "reasonQuotaExhausted": "密鑰 Token 額度已用盡",
+    "reasonDailyQuota": "密鑰今日 Token 額度已用盡",
     "reasonCreditQuota": "密鑰積分額度已用盡",
     "reasonIpNotAllowed": "來源 IP 不在密鑰白名單內",
     "reasonTooManyIps": "密鑰綁定的 IP 數超出上限",
@@ -2082,7 +2106,8 @@
     "账号最短间隔不能大于最长间隔": "帳號最短間隔不能大於最長間隔",
     "秒": "秒",
     "分钟": "分鐘",
-    "请求上限（旧版上游）": "請求上限（舊版上游）"
+    "请求上限（旧版上游）": "請求上限（舊版上游）",
+    "自定义密钥形态未启用：请设置环境变量 WB_KEY_CUSTOM_ENABLED=1 后重启": "自訂金鑰形態未啟用：請設定環境變數 WB_KEY_CUSTOM_ENABLED=1 後重新啟動"
   },
   "redPacket": {
     "title": "紅包",
@@ -2332,5 +2357,27 @@
     "copyValue": "複製內容",
     "longStrings": "值得細看的長字串（{n} 個）：",
     "loadMore": "載入更多（還有 {n} 條）"
+  },
+  "gatewayCors": {
+    "loading": "正在讀取閘道跨域設定…",
+    "loadFailed": "閘道跨域設定沒取到 —— 這不代表沒設定過，請重試。",
+    "title": "閘道跨域（CORS）",
+    "desc": "瀏覽器裡的網頁**直接**請求本閘道的 /v1 介面時，受瀏覽器的同源策略限制，會先在主控台報「跨域」。這裡把允許的來源列出來，瀏覽器就會放行。\n\n它只管資料面（/v1、/v2），驗證用 `Authorization: Bearer` 金鑰；管理面 /api 的來源由部署時的環境變數 WB_CORS_ORIGINS 決定，不在這個面板裡改。",
+    "enable": "啟用閘道跨域",
+    "enableHint": "關掉時瀏覽器直連一律被拒；命令列、SDK、伺服端程式不受影響（它們不送 Origin）。",
+    "originsTitle": "允許的來源",
+    "originsHint": "一行一個，形如 `https://app.example.com`（不帶路徑與斜線）。最多 {max} 條。填 `*` 表示任意來源；本機 file:// 頁面填 `null`。",
+    "originPlaceholder": "https://app.example.com",
+    "addOrigin": "新增來源",
+    "maxAge": "預檢快取（秒）",
+    "maxAgeHint": "瀏覽器記住「這個來源被允許」多久，避免每次請求都送預檢。0 = 每次預檢都回源。上限 7200。",
+    "wildcardWarn": "來源填了 `*`：任何網頁都能讀取本閘道的回應。金鑰仍然有效，但請確認這把金鑰本來就允許被那樣使用。",
+    "save": "儲存",
+    "saved": "閘道跨域設定已儲存，立即生效",
+    "unsaved": "有未儲存的變更",
+    "scope": "作用於 {prefixes}",
+    "adminTitle": "管理面來源（唯讀）",
+    "adminHint": "管理面 /api 用 Cookie 工作階段，允許 `*` 等於把主控台交給任何網頁，所以只能在部署時用環境變數 WB_CORS_ORIGINS 設定（逗號分隔）。這裡顯示目前生效值。",
+    "adminEmpty": "未設定（同源部署，預設）。/api 只接受與面板同源的請求。"
   }
 }
