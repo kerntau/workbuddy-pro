@@ -60,6 +60,84 @@ cd /opt/workbuddy2api && docker compose up -d --build
 
 这三样务必保留：`config.json`（含 `api_key`）、`auths/`（账号授权）、`data/`。
 
+### 直接用预构建的上游镜像（不想本地构建时）
+
+每次发版也会把**上游**构建成镜像推到 GHCR。它和管理端镜像**同源**：都用发布包里
+那份源码（= `upstream-src` 资产 + 我们的全部补丁），所以不会出现「第三方上游镜像
+与项目上游源码不一致」的版本漂移。
+
+```bash
+docker pull ghcr.io/ithtelab/workbuddy2api:<版本>
+# latest 指向最近一次发布；长期跑建议钉版本号（理由同管理端镜像）
+```
+
+要跑多个上游（分组 / 多号池）时，把各自目录里 compose 的 `build: .` 换成 `image:`
+即可，端口与卷不变：
+
+```yaml
+services:
+  wb2api:
+    image: ghcr.io/ithtelab/workbuddy2api:2.8.0
+    container_name: workbuddy2api
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "127.0.0.1:7863:7863"
+    volumes:
+      - ./auths:/app/auths
+      - ./data:/app/data
+      - ./config.json:/app/config.json:ro
+```
+
+三点要知道：
+
+- 镜像里**不带**真实配置（只有 `config.example.json`），`config.json` 必须自己挂；
+  首次使用可从发布包的 `upstream/config.example.json` 复制一份再改。
+- 镜像是**多架构**（amd64 / arm64），与管理端镜像一致。
+- 用镜像之后，上游就**不再由面板的一键更新维护**（那条路同步源码并
+  `docker compose up -d --build`）：升级上游 = 改 `image:` 的版本号 +
+  `docker compose up -d`。面板「全部更新」里针对上游源码的那一步对镜像部署无效，
+  这是预期行为。
+- 镜像自带 `dev.workbuddy.upstream-id` label，面板读运行中容器的这个 label 判断
+  「镜像部署且与本次发布同源」，同源时不会提示「随包上游与本机不一致」。读不到
+  label 的旧镜像（≤ 2.8.2）仍按部署目录的 `.upstream-id` 判定，行为不变。
+
+### 完全不准备上游源码：一条命令起全套
+
+如果这台机器上**不想放任何源码**（NAS / 群晖 / 只想拉镜像的场景），用仓库里的
+`docker-compose.full.yml`：管理端与上游各一个容器，都用 GHCR 上的官方镜像。
+
+```bash
+# 与 docker-compose.yml 放在同一目录（数据默认落在 ./data）
+docker compose -f docker-compose.full.yml up -d
+```
+
+它替你省掉了三件事：
+
+| 通常要做的 | 这个文件如何免掉 |
+|---|---|
+| 准备上游源码目录（`../workbuddy2api`） | 上游跑镜像；管理端的任务脚本由**镜像自带**（构建期从同版本上游镜像取） |
+| 手工放一份 `config.json` | 管理端首次启动就地生成（自动写入随机 `api_key`），上游直接读 |
+| `chown` 数据目录 / 挂 `docker.sock` | 入口脚本按 `PUID`（默认 `10001`，与上游镜像一致）对齐属主，全程不需要 socket |
+
+数据布局与单根部署一致：
+
+```
+./data/
+├── manager/         管理端数据库、管理员、日志
+└── workbuddy2api/   上游 config.json、auths/、data/
+```
+
+三点注意：
+
+- **数据根必须是宿主目录**，不能用命名卷 —— 上游服务挂的是
+  `<数据根>/workbuddy2api` 这个子路径，命名卷不支持子路径。
+- `7863` **不发布到宿主**，只在 compose 网络内供管理端访问；对外只暴露
+  `127.0.0.1:7864`（同样要放在反向代理之后）。
+- 用这个文件后，上游升级 = 改 `WB_UPSTREAM_IMAGE` 的版本号再 `up -d`；
+  面板「一键更新」里的上游源码同步那一步对镜像部署无效，这是预期行为。
+
 ### 许可
 
 上游为 MIT 许可（版权归原作者）。继续使用、修改、再分发都需保留它的 `LICENSE`
@@ -395,8 +473,12 @@ WB_GITHUB_MIRROR=https://gh-proxy.com/
 「一键更新」即可；想在容器里跑命令行也行：
 
 ```bash
-docker compose exec workbuddy-manager python /app/deploy/update.py --target both
+docker compose exec -u app workbuddy-manager python /app/deploy/update.py --target both
 ```
+
+> `-u app` 不能省。容器入口会先以 root 对齐挂载目录属主、再降权运行，但
+> `docker compose exec` **不走入口脚本**，不加这个参数就是 root shell ——
+> 用它改出来的文件属主是 root，之后面板以 `app` 身份更新时会写不进去。
 
 > 这条命令结束时**会按设计终止容器**（更新进程发信号给 PID 1，再由 compose 的
 > `restart: unless-stopped` 用新代码拉起），所以 `exec` 会跟着断开 —— 这是正常的。
@@ -530,8 +612,8 @@ chmod g+s /opt/workbuddy2api/auths
 
 **Q：容器反复重启，日志报 `unable to open database file` / 「目录不可写：/app/data」**
 
-这是**权限**问题，不是数据库坏了，也不是路径配错。管理端容器以 uid 10001 运行
-（Dockerfile 里的 `USER app`），而 compose 默认把宿主 `./data` bind mount 到
+这是**权限**问题，不是数据库坏了，也不是路径配错。管理端容器以非 root 用户运行
+（镜像里的 `app`，默认 uid 10001），而 compose 默认把宿主 `./data` bind mount 到
 `/app/data` —— 这个目录的属主由宿主机决定，Docker 首次自动创建时归 `root`，
 容器内的 10001 写不进去，SQLite 连库文件都建不了，启动即失败；配合
 `restart: unless-stopped` 就表现为一直重启、页面打不开。
@@ -542,7 +624,21 @@ chmod g+s /opt/workbuddy2api/auths
 ls -ld ./data     # drwxr-xr-x root root → 中招
 ```
 
-**修法一（能 SSH、能改属主，推荐）**：只改权限，不动配置，也不用重建容器：
+**修法一（本版默认行为，什么都不用做）**：镜像入口会探测挂载目录的实际属主，
+把容器内用户的 uid/gid 改成它，再对齐属主、降权运行 —— 群晖 / 极空间 / Unraid
+这类图形界面设备不用开 SSH。日志里会有一行：
+
+```
+[entrypoint] 修正 /app/data 属主 → 1026:100
+```
+
+需要固定身份时在 `.env` 里填 `PUID` / `PGID`（值取 `stat -c '%u' ./data` 与
+`stat -c '%g' ./data`；留空即自动探测）。填 `0` 不会生效：探测到 root 会回落
+10001，业务进程始终不以 root 运行。想关掉这段逻辑（自己用 `user:` 接管容器
+身份）就设 `WB_FIX_OWNERSHIP=0`。
+
+**修法二（老镜像，或已设 `WB_FIX_OWNERSHIP=0`）**：只改权限，不动配置，也不用
+重建容器：
 
 ```bash
 sudo chown -R 10001:10001 ./data
@@ -552,7 +648,7 @@ docker restart workbuddy-manager
 > 只 `restart`，不要 `docker compose up -d`：后者会用镜像里的代码重建容器，
 > 之前通过面板「一键更新」装进容器的新代码会退回旧版（见上表）。
 
-**修法二（NAS / 群晖 / SMB / 没开 SSH，改不了属主）**：换成命名卷。命名卷首次
+**修法三（NFS / SMB 上改不了属主）**：换成命名卷。命名卷首次
 创建时会继承镜像内 `/app/data` 的属主（10001），不需要 chown。
 
 - 新版 compose（挂载行是 `${WB_DATA_VOLUME:-./data}:/app/data`）：在 compose
@@ -572,6 +668,21 @@ docker restart workbuddy-manager
 `docker compose cp workbuddy-manager:/app/data/manager.db ./manager.db`。
 首次启动就失败时 `./data` 是空的，直接切即可；若里面已有数据，先用
 `cp -a ./data/ ./data.bak/` 留一份再操作。
+
+**Q：容器日志太多 / 启动失败看不到原因**
+
+逐请求的 access log 默认关掉了 —— 健康检查每 30 秒一次、前端不断轮询，全打出来
+只会把有用的信息淹掉。请求记录没丢：界面「请求日志」记谁、何时、哪个账号、多少
+token，「IP 访问日志」记谁被拦、为什么，都能按条件过滤。要临时看原始请求行，
+在 `.env` 里设 `WB_ACCESS_LOG=1` 再重启。
+
+启动失败时现在只打印一段精简说明：醒目的失败标题、根因与修法（逐字保留）、以及
+出错位置。框架内部那些重复几十层的调用栈不会再出现。需要连项目自身的栈帧一起
+看时保持 `WB_STARTUP_FAILURE_STACK=1`（默认），日志空间特别紧才设 0。
+
+```bash
+docker compose logs workbuddy-manager --tail=80     # 看最近的日志
+```
 
 **Q：首次构建上游很慢**
 上游是 Go 项目，首次 `docker compose up --build` 需拉取基础镜像并编译，

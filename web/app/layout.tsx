@@ -1,4 +1,5 @@
 import type {Metadata} from 'next';
+import localFont from 'next/font/local';
 import {Toaster} from '@/components/ui/sonner';
 import {ThemeProvider} from '@/components/common/layout/ThemeProvider';
 import {AuthProvider} from '@/lib/auth-context';
@@ -6,23 +7,24 @@ import {I18nProvider} from '@/lib/i18n/provider';
 import {withBasePath} from '@/lib/base-path';
 import './globals.css';
 
-// 字体策略：**暂时改为系统字体栈**（globals.css 的 font-sans）。
-//
-// 原文用的是 next/font/google 在构建期下载并自托管 Inter / Noto Sans SC；但
-// Turbopack 会在编译期访问 fonts.gstatic.com，本机网络拿不到时 `next dev`
-// 直接 500 —— 表现为「整站打不开」，与业务代码无关，排查很费时（实测连续
-// 三次 500，日志里是 Can't resolve '@vercel/turbopack-next/internal/font/google/font'）。
-//
-// 因此这里去掉 next/font，开发与生产统一走系统字体，断网也能渲染。
-// **发布前若要保持原来的自托管字体与排版观感**（中文 Noto Sans SC 与系统
-// 字体的字形、字宽略有差异），把这几行加回来即可：
-//
-//   import {Inter, Noto_Sans_SC} from 'next/font/google';
-//   const inter = Inter({variable: '--font-inter', subsets: ['latin'], display: 'swap'});
-//   const notoSansSC = Noto_Sans_SC({variable: '--font-noto-sans-sc', subsets: ['latin'],
-//                                    display: 'swap', weight: ['300','400','500','600','700']});
-//
-// 然后把 html / body 的 className 换回 `${inter.variable} ${notoSansSC.variable}`。
+// 字体改为随仓库分发的本地文件：原来用 next/font/google 时，构建期必须联网访问
+// fonts.googleapis.com 拉 CSS 与 woff2。GitHub Actions、国内 Docker 构建经常连不上
+// （next/font 只会报一句含糊的 `TypeError: Cannot read properties of null`），整个
+// next build 直接失败，镜像也就建不出来。字体文件与原先 google 版本同源、同子集
+// （latin），appearance 不变，但构建不再依赖外网。
+const inter = localFont({
+  src: './fonts/Inter-variable.woff2',
+  variable: '--font-inter',
+  display: 'swap',
+  weight: '100 900',
+});
+
+const notoSansSC = localFont({
+  src: './fonts/NotoSansSC-variable.woff2',
+  variable: '--font-noto-sans-sc',
+  display: 'swap',
+  weight: '300 700',
+});
 
 export const metadata: Metadata = {
   title: {
@@ -59,10 +61,10 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className="hide-scrollbar font-sans"
+      className={`${inter.variable} ${notoSansSC.variable} hide-scrollbar font-sans`}
       suppressHydrationWarning
     >
-      <body className="hide-scrollbar font-sans antialiased">
+      <body className={`${inter.variable} ${notoSansSC.variable} hide-scrollbar font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
